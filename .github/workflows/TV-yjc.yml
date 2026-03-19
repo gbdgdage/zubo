@@ -1,4 +1,4 @@
-name: Sync IP Folder
+name: IP_TV-yjc
 on:
   schedule:
     - cron: '0 17 * * *'
