@@ -1,8 +1,8 @@
-name: IP_iptvz
+name: Sync & Append IP from iptvz (exclude archive)
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
   schedule:
-    - cron: '0 18 * * *'  
+    - cron: '0 */6 * * *'
 
 jobs:
   sync-append:
@@ -23,27 +23,33 @@ jobs:
           mkdir -p ip
           cd ip
 
-          # 遍历源文件：只取联通/电信_ip.txt，排除存档_开头
           find ../temp-iptvz/ip -type f \
             -name "*联通_ip.txt" -o -name "*电信_ip.txt" \
             | grep -v "存档_" | while read src_file; do
 
             filename=$(basename "$src_file")
-            base="${filename/_ip.txt/}"  # 例如：北京联通_ip.txt → 北京联通
+            base="${filename/_ip.txt/}"
 
-            # 自动映射文件名：直辖市加"市"，其他省份不变
-            case "$base" in
-              北京*) dest="${base/北京/北京市}.txt" ;;
-              天津*) dest="${base/天津/天津市}.txt" ;;
-              上海*) dest="${base/上海/上海市}.txt" ;;
-              *)    dest="${base}.txt" ;;
-            esac
+            # 自动映射文件名：直辖市加"市"
+            if [[ "$base" == 北京* ]]; then
+              dest="${base/北京/北京市}.txt"
+            elif [[ "$base" == 天津* ]]; then
+              dest="${base/天津/天津市}.txt"
+            elif [[ "$base" == 上海* ]]; then
+              dest="${base/上海/上海市}.txt"
+            else
+              dest="${base}.txt"
+            fi
 
             echo "处理: $filename → $dest"
 
-            # 只追加目标文件中不存在的行（去重+不覆盖）
             if [ -f "$dest" ]; then
-              grep -xFf "$dest" "$src_file" -v >> "$dest"
+              if [ -s "$dest" ]; then
+                # 关键修复：给grep加上 || true，避免无新行时报错
+                grep -xFf "$dest" "$src_file" -v >> "$dest" || true
+              else
+                cat "$src_file" >> "$dest"
+              fi
             else
               cat "$src_file" > "$dest"
             fi
