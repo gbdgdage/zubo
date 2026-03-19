@@ -29,16 +29,19 @@ jobs:
             filename=$(basename "$src_file")
             base="${filename/_ip.txt/}"
 
-            # 自动映射文件名：直辖市加"市"
-            if [[ "$base" == 北京* ]]; then
-              dest="${base/北京/北京市}.txt"
-            elif [[ "$base" == 天津* ]]; then
-              dest="${base/天津/天津市}.txt"
-            elif [[ "$base" == 上海* ]]; then
-              dest="${base/上海/上海市}.txt"
+            # 自动映射文件名：直辖市加"市"（支持北京/天津/上海/重庆）
+            province_part="${base:0:2}"
+            operator_part="${base:2}"
+            CITY_LIST="北京 天津 上海 重庆"
+
+            # 判断是否为直辖市，决定是否加“市”
+            if echo " $CITY_LIST " | grep -q " $province_part "; then
+              target_province="${province_part}市"
             else
-              dest="${base}.txt"
+              target_province="$province_part"
             fi
+
+            dest="${target_province}${operator_part}.txt"
 
             echo "处理: $filename → $dest"
 
