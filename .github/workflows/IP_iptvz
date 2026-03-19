@@ -1,0 +1,68 @@
+name: IP_iptvz
+on:
+  workflow_dispatch:  # 手动触发
+  schedule:
+    - cron: '0 18 * * *'  
+
+jobs:
+  sync-append:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 我的仓库 (zubo)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 1
+
+      - name: 克隆源仓库 (iptvz)
+        run: |
+          git clone --depth 1 https://github.com/q1017673817/iptvz.git temp-iptvz
+
+      - name: 追加所有电信、联通IP（排除存档+自动适配直辖市）
+        run: |
+          mkdir -p ip
+          cd ip
+
+          # 遍历源文件：只取联通/电信_ip.txt，排除存档_开头
+          find ../temp-iptvz/ip -type f \
+            -name "*联通_ip.txt" -o -name "*电信_ip.txt" \
+            | grep -v "存档_" | while read src_file; do
+
+            filename=$(basename "$src_file")
+            base="${filename/_ip.txt/}"  # 例如：北京联通_ip.txt → 北京联通
+
+            # 自动映射文件名：直辖市加"市"，其他省份不变
+            case "$base" in
+              北京*) dest="${base/北京/北京市}.txt" ;;
+              天津*) dest="${base/天津/天津市}.txt" ;;
+              上海*) dest="${base/上海/上海市}.txt" ;;
+              *)    dest="${base}.txt" ;;
+            esac
+
+            echo "处理: $filename → $dest"
+
+            # 只追加目标文件中不存在的行（去重+不覆盖）
+            if [ -f "$dest" ]; then
+              grep -xFf "$dest" "$src_file" -v >> "$dest"
+            else
+              cat "$src_file" > "$dest"
+            fi
+          done
+
+      - name: 清理临时克隆目录
+        run: |
+          rm -rf temp-iptvz
+
+      - name: 提交并推送变更
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add ip/*.txt
+          if git diff --staged --quiet; then
+            echo "✅ 无新IP可追加"
+          else
+            git commit -m "chore: append new IPs from iptvz (telecom & unicom, exclude archive)"
+            git push
+            echo "✅ 已成功追加并推送新IP"
+          fi
