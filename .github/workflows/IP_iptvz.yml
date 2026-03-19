@@ -1,4 +1,4 @@
-name: Sync & Append IP from iptvz (exclude archive)
+name: IP_iptvz
 on:
   workflow_dispatch:
   schedule:
