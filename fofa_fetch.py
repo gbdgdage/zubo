@@ -413,21 +413,28 @@ def third_stage():
 
     print(f"✅ 检测完成，可播放 IP 共 {len(playable_ips)} 个")
 
-    # 按频道收集线路（最多50条）
+    # 按频道收集线路（最多50条，优先北京、上海、四川IP）
     channel_lines = {}
     operator_playable_ips = {}
+    priority_provinces = {"北京", "上海", "四川"}
     for ip_port in playable_ips:
         operator = ip_info.get(ip_port, "未知")
         operator_playable_ips.setdefault(operator, set()).add(ip_port)
+     # 直接从 operator 里判断省份
+        province = "未知"
+        for prov in priority_provinces:
+            if prov in operator:
+               province = prov
+               break
         for c, u in groups.get(ip_port, []):
             key = f"{c},{u}${operator}"
-            channel_lines.setdefault(c, []).append(key)
-    # 每个频道只保留前 50 条
+            channel_lines.setdefault(c, []).append((key, province))
     valid_lines = []
-    for ch, lines in channel_lines.items():
-        valid_lines.extend(lines[:50])  # 这里控制最多50条
-    print(f"✅ 已限制：每个频道最多保留 50 条线路")
-
+    for ch, items in channel_lines.items():
+        items.sort(key=lambda x: 0 if x[1] in priority_provinces else 1)
+        valid_lines.extend([key for key, prov in items[:50]])
+    print(f"✅ 已限制：每个频道最多保留 50 条线路，优先北京、上海、四川IP")
+    
     # 写回IP文件
     for operator, ip_set in operator_playable_ips.items():
         target_file = os.path.join(IP_DIR, operator + ".txt")
