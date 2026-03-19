@@ -84,5 +84,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add ip/
-          git commit -m "Auto extract & append IP from iptv.txt" || echo "No changes to commit"
+          git commit -m "从kakaxi更新" || echo "No changes to commit"
           git push
