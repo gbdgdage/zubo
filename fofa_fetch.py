@@ -427,6 +427,17 @@ def third_stage():
     for ch, lines in channel_lines.items():
         valid_lines.extend(lines[:50])  # 这里控制最多50条
     print(f"✅ 已限制：每个频道最多保留 50 条线路")
+
+    # 写回IP文件
+    for operator, ip_set in operator_playable_ips.items():
+        target_file = os.path.join(IP_DIR, operator + ".txt")
+        try:
+            with open(target_file, "w", encoding="utf-8") as wf:
+                for ip_p in sorted(ip_set):
+                    wf.write(ip_p + "\n")
+            print(f"📥 写回 {target_file}，共 {len(ip_set)} 个可用地址")
+        except Exception as e:
+            print(f"❌ 写回 {target_file} 失败：{e}")
     
     # 写 IPTV.txt（包含更新时间与分类）
     beijing_now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
