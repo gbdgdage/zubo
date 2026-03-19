@@ -11,7 +11,6 @@ jobs:
       - name: Checkout 我的仓库 (zubo)
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
       - name: 克隆源仓库 (iptvz)
