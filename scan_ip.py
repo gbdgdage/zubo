@@ -5,8 +5,14 @@ import glob
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# ==================== 全局配置（针对你当前所有配置优化）====================
+MAX_SCAN_DURATION = 2400    # 最大扫描时长 40 分钟（足够跑完 3.6 万 IP）
+DEFAULT_MAX_WORKERS = 100   # 线程池大小（GitHub Actions 推荐 80-120）
+REQUEST_TIMEOUT = 1.2      # 请求超时（缩短到 1.2 秒，加快无效 IP 跳过）
+PROGRESS_INTERVAL = 2000    # 每扫描 2000 个 IP 打印一次进度
+
 def expand_ip_range(ip_str):
-    """扩展IP范围，返回IP列表"""
+    """扩展IP范围，支持 123.118.48-63.161 这类格式"""
     ip_list = []
     parts = ip_str.split('.')
     if len(parts) != 4:
@@ -23,7 +29,7 @@ def expand_ip_range(ip_str):
     return ip_list
 
 def expand_part(part):
-    """扩展单个部分，支持范围和单个值"""
+    """扩展单个IP段，支持 x-y 格式"""
     if '-' in part:
         start, end = part.split('-')
         return [str(i) for i in range(int(start), int(end) + 1)]
@@ -31,8 +37,8 @@ def expand_part(part):
         return [part]
 
 def read_config(config_file):
-    """读取配置文件，返回配置行列表和原始行列表"""
-    print(f"读取设置文件：{config_file}")
+    """读取配置文件，自动解析 IP:端口,option 格式"""
+    print(f"读取配置文件：{config_file}")
     ip_configs = []
     original_lines = []
     try:
@@ -51,11 +57,12 @@ def read_config(config_file):
                     option = int(parts[1])
                 else:
                     ip_part_port = line.strip()
-                    option = 12
+                    option = 12  # 默认 option=12
                 if ":" not in ip_part_port:
                     print(f"第{line_num}行格式错误: 缺少端口号 - {line}")
                     continue
                 ip_part, port = ip_part_port.split(':')
+                # 处理 IP 范围扩展
                 if '-' in ip_part:
                     expanded_ips = expand_ip_range(ip_part)
                     print(f"  第{line_num}行IP扩展: {ip_part} -> {len(expanded_ips)} 个IP")
@@ -64,7 +71,7 @@ def read_config(config_file):
                         a, b, c, d = ip_parts
                         url_end = "/status" if option >= 10 else "/stat"
                         base_ip = f"{a}.{b}.{c}.1" if option % 2 == 0 else f"{a}.{b}.1.1"
-                        ip_configs.append((base_ip, port, option, url_end, line_num-1, f"{expanded_ip}:{port},{option}" if "," in line else f"{expanded_ip}:{port}"))
+                        ip_configs.append((base_ip, port, option, url_end, line_num-1, f"{expanded_ip}:{port},{option}"))
                 else:
                     ip_parts = ip_part.split('.')
                     if len(ip_parts) != 4:
@@ -83,7 +90,7 @@ def read_config(config_file):
         return [], []
 
 def generate_ip_ports(ip, port, option):
-    """根据选项生成要扫描的IP地址列表"""
+    """根据 option 生成待扫描 IP:端口列表"""
     a, b, c, d = ip.split('.')
     if option == 2 or option == 12:
         c_extent = c.split('-')
@@ -92,56 +99,65 @@ def generate_ip_ports(ip, port, option):
         return [f"{a}.{b}.{x}.{y}:{port}" for x in range(c_first, c_last) for y in range(1, 256)]
     elif option == 0 or option == 10:
         return [f"{a}.{b}.{c}.{y}:{port}" for y in range(1, 256)]
-    else:
-        return [f"{a}.{b}.{x}.{y}:{port}" for x in range(256) for y in range(1, 256)]
+    else:  # option=1/11（你现在几乎不用，保留兼容）
+        c_start = max(0, int(c) - 4)
+        c_end = min(256, c_start + 8)
+        return [f"{a}.{b}.{x}.{y}:{port}" for x in range(c_start, c_end) for y in range(1, 256)]
 
-def check_ip_port(ip_port, url_end):    
-    """检查IP端口是否可用"""
+def check_ip_port(ip_port, url_end):
+    """检查 IP:端口 是否为有效 udpxy 服务"""
     try:
         url = f"http://{ip_port}{url_end}"
-        resp = requests.get(url, timeout=2)
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         if "Multi stream daemon" in resp.text or "udpxy status" in resp.text:
             return ip_port
     except:
         return None
 
-def scan_ip_port(ip, port, option, url_end):
-    """扫描IP端口"""
-    def show_progress():
-        while checked[0] < len(ip_ports) and option % 2 == 1:
-            time.sleep(5)
+def scan_ip_port(ip, port, option, url_end, start_time):
+    """执行扫描，带超时控制"""
     valid_ip_ports = []
     ip_ports = generate_ip_ports(ip, port, option)
+    if not ip_ports:
+        return valid_ip_ports
     checked = [0]
-    if option % 2 == 1:
-        Thread(target=show_progress, daemon=True).start()
+    print(f"  待扫描: {len(ip_ports)} 个IP")
 
-    # 这里已经改成 200 / 80
-    max_workers = 200 if option % 2 == 1 else 80
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=DEFAULT_MAX_WORKERS) as executor:
         futures = {executor.submit(check_ip_port, ip_port, url_end): ip_port for ip_port in ip_ports}
         for future in as_completed(futures):
+            elapsed = time.time() - start_time
+            if elapsed > MAX_SCAN_DURATION:
+                print("\n⚠️  扫描超时，提前终止")
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
             result = future.result()
             if result:
                 valid_ip_ports.append(result)
             checked[0] += 1
+            if checked[0] % PROGRESS_INTERVAL == 0:
+                print(f"  已扫描: {checked[0]}/{len(ip_ports)}")
     return valid_ip_ports
 
-def process_config_file(config_file):
-    """处理配置文件，扫描并返回有效IP"""
+def process_config_file(config_file, start_time):
+    """处理单个省份配置文件"""
     filename = os.path.basename(config_file)
     province_name = os.path.splitext(filename)[0].replace("_config", "")
     print(f"\n{'='*25}\n   处理: {province_name}\n{'='*25}")
     configs, original_lines = read_config(config_file)
     if not configs:
-        print(f"配置文件 {filename} 中没有有效的配置行")
+        print(f"配置文件 {filename} 中没有有效配置行")
         return []
     all_valid_ip_ports = []
     total_configs = len(configs)
     for idx, (ip, port, option, url_end, line_num, original_line) in enumerate(configs, 1):
+        elapsed = time.time() - start_time
+        if elapsed > MAX_SCAN_DURATION:
+            print("\n⚠️  总扫描超时，跳过剩余配置行")
+            break
         print(f"\n[{idx}/{total_configs}] 扫描: {original_line}")
-        valid_ips = scan_ip_port(ip, port, option, url_end)
+        valid_ips = scan_ip_port(ip, port, option, url_end, start_time)
         if valid_ips:
             all_valid_ip_ports.extend(valid_ips)
             print(f"  找到 {len(valid_ips)} 个有效IP")
@@ -150,21 +166,26 @@ def process_config_file(config_file):
     return all_valid_ip_ports, province_name
 
 def main():
+    start_time = time.time()
     ip_dir = "ip_demo"
     if not os.path.exists(ip_dir):
-        print(f"错误：配置目录 {ip_dir} 不存在，请先同步配置文件")
+        print(f"错误：配置目录 {ip_dir} 不存在，请先同步代码")
         return
     result_dir = "ip"
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
-        print(f"创建目录: {result_dir}")
+        print(f"创建结果目录: {result_dir}")
     config_files = glob.glob(os.path.join(ip_dir, "*_config.txt"))
     if not config_files:
-        print(f"在 '{ip_dir}' 目录下未找到以'_config.txt'结尾的配置文件")
+        print(f"在 '{ip_dir}' 目录下未找到配置文件")
         return
-    print(f"找到 {len(config_files)} 个配置文件")
+    print(f"找到 {len(config_files)} 个省份配置文件")
     for config_file in config_files:
-        valid_ip_ports, province_name = process_config_file(config_file)
+        elapsed = time.time() - start_time
+        if elapsed > MAX_SCAN_DURATION:
+            print("\n⚠️  总扫描超时，跳过剩余省份")
+            break
+        valid_ip_ports, province_name = process_config_file(config_file, start_time)
         if valid_ip_ports:
             valid_ip_ports = sorted(set(valid_ip_ports))
             result_filename = f"{province_name}.txt"
@@ -180,12 +201,13 @@ def main():
             new_count = len(all_ips) - len(existing_ips)
             with open(result_path, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(all_ips))
-            print(f"{province_name}: 保存 {len(all_ips)} 个有效IP到 {result_filename} (新增 {new_count} 个)")
+            print(f"{province_name}: 保存 {len(all_ips)} 个有效IP (新增 {new_count} 个)")
         else:
             print(f"{province_name}: 没有找到有效IP")
         print("-" * 50)
-    print(f"\nIP地址扫描完成")
-    print(f"扫描结果保存在 {result_dir} 目录下")
+    elapsed_total = time.time() - start_time
+    print(f"\n✅ 扫描完成！总耗时: {elapsed_total:.2f} 秒")
+    print(f"📁 结果保存在 {result_dir}/ 目录下")
 
 if __name__ == "__main__":
     main()
