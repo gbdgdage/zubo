@@ -96,23 +96,18 @@ def generate_ip_ports(ip, port, option):
         return [f"{a}.{b}.{x}.{y}:{port}" for x in range(256) for y in range(1, 256)]
 
 def check_ip_port(ip_port, url_end):    
-    """检查IP端口是否可用（增加请求头+延迟）"""
+    """检查IP端口是否可用"""
     try:
         url = f"http://{ip_port}{url_end}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        resp = requests.get(url, headers=headers, timeout=3)
+        resp = requests.get(url, timeout=2)
         resp.raise_for_status()
         if "Multi stream daemon" in resp.text or "udpxy status" in resp.text:
-            time.sleep(0.1)
             return ip_port
-        time.sleep(0.1)
     except:
         return None
 
 def scan_ip_port(ip, port, option, url_end):
-    """扫描IP端口（降低最大线程数）"""
+    """扫描IP端口"""
     def show_progress():
         while checked[0] < len(ip_ports) and option % 2 == 1:
             time.sleep(5)
@@ -121,7 +116,9 @@ def scan_ip_port(ip, port, option, url_end):
     checked = [0]
     if option % 2 == 1:
         Thread(target=show_progress, daemon=True).start()
-    max_workers = 50 if option % 2 == 1 else 30
+
+    # 这里已经改成 200 / 80
+    max_workers = 200 if option % 2 == 1 else 80
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(check_ip_port, ip_port, url_end): ip_port for ip_port in ip_ports}
         for future in as_completed(futures):
@@ -134,7 +131,6 @@ def scan_ip_port(ip, port, option, url_end):
 def process_config_file(config_file):
     """处理配置文件，扫描并返回有效IP"""
     filename = os.path.basename(config_file)
-    # 提取省份名：如"上海电信_config.txt" → "上海电信"
     province_name = os.path.splitext(filename)[0].replace("_config", "")
     print(f"\n{'='*25}\n   处理: {province_name}\n{'='*25}")
     configs, original_lines = read_config(config_file)
@@ -154,35 +150,25 @@ def process_config_file(config_file):
     return all_valid_ip_ports, province_name
 
 def main():
-    # 配置文件目录：ip_demo
     ip_dir = "ip_demo"
     if not os.path.exists(ip_dir):
         print(f"错误：配置目录 {ip_dir} 不存在，请先同步配置文件")
         return
-    
-    # 结果输出目录：改为 ip（与你现有结构一致）
     result_dir = "ip"
     if not os.path.exists(result_dir):
         os.makedirs(result_dir)
         print(f"创建目录: {result_dir}")
-    
-    # 获取 ip_demo 下所有 *_config.txt 文件
     config_files = glob.glob(os.path.join(ip_dir, "*_config.txt"))
     if not config_files:
         print(f"在 '{ip_dir}' 目录下未找到以'_config.txt'结尾的配置文件")
         return
-    
     print(f"找到 {len(config_files)} 个配置文件")
-    
-    # 处理所有配置文件
     for config_file in config_files:
         valid_ip_ports, province_name = process_config_file(config_file)
         if valid_ip_ports:
             valid_ip_ports = sorted(set(valid_ip_ports))
             result_filename = f"{province_name}.txt"
             result_path = os.path.join(result_dir, result_filename)
-            
-            # 读取已有IP（实现追加不覆盖）
             existing_ips = set()
             if os.path.exists(result_path):
                 try:
@@ -190,20 +176,14 @@ def main():
                         existing_ips = set(line.strip() for line in f if line.strip())
                 except:
                     existing_ips = set()
-            
-            # 合并去重
             all_ips = sorted(set(list(existing_ips) + valid_ip_ports))
             new_count = len(all_ips) - len(existing_ips)
-            
-            # 写入（覆盖整个文件，但内容是旧+新的去重集合，实现逻辑上的"追加"）
             with open(result_path, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(all_ips))
-            
             print(f"{province_name}: 保存 {len(all_ips)} 个有效IP到 {result_filename} (新增 {new_count} 个)")
         else:
             print(f"{province_name}: 没有找到有效IP")
         print("-" * 50)
-    
     print(f"\nIP地址扫描完成")
     print(f"扫描结果保存在 {result_dir} 目录下")
 
