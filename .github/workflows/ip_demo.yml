@@ -1,4 +1,4 @@
-name: IP_dwmo
+name: IP_demo
 
 on:
   workflow_dispatch:  # 允许手动触发
