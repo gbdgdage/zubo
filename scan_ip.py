@@ -5,14 +5,13 @@ import glob
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ==================== 全局配置（针对你当前所有配置优化）====================
-MAX_SCAN_DURATION = 2400    # 最大扫描时长 40 分钟（足够跑完 3.6 万 IP）
-DEFAULT_MAX_WORKERS = 100   # 线程池大小（GitHub Actions 推荐 80-120）
-REQUEST_TIMEOUT = 1.2      # 请求超时（缩短到 1.2 秒，加快无效 IP 跳过）
-PROGRESS_INTERVAL = 2000    # 每扫描 2000 个 IP 打印一次进度
+# ==================== 只提速不减量版全局配置 ====================
+MAX_SCAN_DURATION = 2400    # 最大扫描时长 40 分钟
+DEFAULT_MAX_WORKERS = 80     # 线程池大小（优化后）
+REQUEST_TIMEOUT = 0.7       # 请求超时（提速关键）
+PROGRESS_INTERVAL = 2000    # 进度日志间隔
 
 def expand_ip_range(ip_str):
-    """扩展IP范围，支持 123.118.48-63.161 这类格式"""
     ip_list = []
     parts = ip_str.split('.')
     if len(parts) != 4:
@@ -29,7 +28,6 @@ def expand_ip_range(ip_str):
     return ip_list
 
 def expand_part(part):
-    """扩展单个IP段，支持 x-y 格式"""
     if '-' in part:
         start, end = part.split('-')
         return [str(i) for i in range(int(start), int(end) + 1)]
@@ -37,7 +35,6 @@ def expand_part(part):
         return [part]
 
 def read_config(config_file):
-    """读取配置文件，自动解析 IP:端口,option 格式"""
     print(f"读取配置文件：{config_file}")
     ip_configs = []
     original_lines = []
@@ -57,12 +54,11 @@ def read_config(config_file):
                     option = int(parts[1])
                 else:
                     ip_part_port = line.strip()
-                    option = 12  # 默认 option=12
+                    option = 12
                 if ":" not in ip_part_port:
                     print(f"第{line_num}行格式错误: 缺少端口号 - {line}")
                     continue
                 ip_part, port = ip_part_port.split(':')
-                # 处理 IP 范围扩展
                 if '-' in ip_part:
                     expanded_ips = expand_ip_range(ip_part)
                     print(f"  第{line_num}行IP扩展: {ip_part} -> {len(expanded_ips)} 个IP")
@@ -90,22 +86,20 @@ def read_config(config_file):
         return [], []
 
 def generate_ip_ports(ip, port, option):
-    """根据 option 生成待扫描 IP:端口列表"""
     a, b, c, d = ip.split('.')
     if option == 2 or option == 12:
         c_extent = c.split('-')
         c_first = int(c_extent[0]) if len(c_extent) == 2 else int(c)
-        c_last = int(c_extent[1]) + 1 if len(c_extent) == 2 else int(c) + 8
+        c_last = int(c_extent[1]) + 1 if len(c_extent) == 2 else int(c) + 8  # 保持 +8，扫描总量不变
         return [f"{a}.{b}.{x}.{y}:{port}" for x in range(c_first, c_last) for y in range(1, 256)]
     elif option == 0 or option == 10:
         return [f"{a}.{b}.{c}.{y}:{port}" for y in range(1, 256)]
-    else:  # option=1/11（你现在几乎不用，保留兼容）
+    else:
         c_start = max(0, int(c) - 4)
         c_end = min(256, c_start + 8)
         return [f"{a}.{b}.{x}.{y}:{port}" for x in range(c_start, c_end) for y in range(1, 256)]
 
 def check_ip_port(ip_port, url_end):
-    """检查 IP:端口 是否为有效 udpxy 服务"""
     try:
         url = f"http://{ip_port}{url_end}"
         resp = requests.get(url, timeout=REQUEST_TIMEOUT)
@@ -116,14 +110,12 @@ def check_ip_port(ip_port, url_end):
         return None
 
 def scan_ip_port(ip, port, option, url_end, start_time):
-    """执行扫描，带超时控制"""
     valid_ip_ports = []
     ip_ports = generate_ip_ports(ip, port, option)
     if not ip_ports:
         return valid_ip_ports
     checked = [0]
     print(f"  待扫描: {len(ip_ports)} 个IP")
-
     with ThreadPoolExecutor(max_workers=DEFAULT_MAX_WORKERS) as executor:
         futures = {executor.submit(check_ip_port, ip_port, url_end): ip_port for ip_port in ip_ports}
         for future in as_completed(futures):
@@ -141,9 +133,10 @@ def scan_ip_port(ip, port, option, url_end, start_time):
     return valid_ip_ports
 
 def process_config_file(config_file, start_time):
-    """处理单个省份配置文件"""
     filename = os.path.basename(config_file)
     province_name = os.path.splitext(filename)[0].replace("_config", "")
+    if province_name in ["北京", "上海"]:
+        province_name = f"{province_name}市"
     print(f"\n{'='*25}\n   处理: {province_name}\n{'='*25}")
     configs, original_lines = read_config(config_file)
     if not configs:
