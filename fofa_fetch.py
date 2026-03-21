@@ -290,7 +290,7 @@ def third_stage():
     if not os.path.exists(ZUBO_FILE):
         print("⚠️ zubo.txt 不存在，跳过第三阶段")
         return None
-    def check_stream(url, timeout=5):
+    def check_stream(url, timeout=10):
         try:
             result = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_streams", "-i", url],
@@ -339,7 +339,7 @@ def third_stage():
         rep_channels = [u for c, u in entries if c == "CCTV1"]
         if not rep_channels and entries:
             rep_channels = [entries[0][1]]
-        playable = any(check_stream(u) for u in rep_channels)
+        playable = any(check_stream(u, timeout=10) for u in rep_channels)
         return ip_port, playable
     print(f"🚀 启动多线程检测（共 {len(groups)} 个 IP）...")
     playable_ips = set()
