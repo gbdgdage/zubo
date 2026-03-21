@@ -2,15 +2,18 @@ name: tuisong
 
 on:
   workflow_run:
-    workflows: ["zubo"]  # 这里要改！
-    types:
-      - completed
-  workflow_dispatch:  # 保留手动触发选项
+    workflows: ["zubo"]
+    types: [completed]
+  workflow_dispatch:  # 保留手动触发
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}  # 仅主任务成功后才执行
+    # ✅ 关键修改：让手动触发也能执行
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success')
+
     steps:
       - name: Checkout 源仓库 (zuo)
         uses: actions/checkout@v4
@@ -43,4 +46,4 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add IPTV.txt
           git commit -m "chore: sync IPTV.txt from zuo repo" || echo "⚠️ 无文件变更，无需提交"
-          git push origin master
+          git push origin master  # 注意这里是 master 分支
