@@ -81,7 +81,7 @@ CHANNEL_MAPPING = {
     "陕西卫视": ["陕西卫视"],
 }
 
-RESULTS_PER_CHANNEL = 20
+RESULTS_PER_CHANNEL = 50
 
 def exact_channel_match(channel_name, pattern_name):
     clean_name = remove_special_symbols(channel_name.strip().lower())
