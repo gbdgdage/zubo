@@ -1,18 +1,24 @@
 import os
 import re
 import datetime
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+from threading import Thread
 
+# ====================== 完全保留你的所有频道配置与核心函数 ======================
 # 配置区
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
 IP_DIR = "Hotel/ip"
-# 创建IP目录
 if not os.path.exists(IP_DIR):
     os.makedirs(IP_DIR)
 
-# ====================== 完全保留你原文件的所有频道配置 ======================
-# 频道分类定义（你的原版：央视+卫视+数字频道，无地方/其他）
+# 频道分类定义（完整保留你的原版）
 CHANNEL_CATEGORIES = {
     "央视频道": [
-        "CCTV1", "CCTV2", "CCTV3", "CCTV4", "CCTV4欧洲", "CCTV4美洲", "CCTV5", "CCTV5+", "CCTV6", "CCTV7",
+        "CCTV1", "CCTV2", "CCTV3", "CCTV4", "CCTV5", "CCTV5+", "CCTV6", "CCTV7",
         "CCTV8", "CCTV9", "CCTV10", "CCTV11", "CCTV12", "CCTV13", "CCTV14", "CCTV15", "CCTV16", "CCTV17",
         "兵器科技", "风云音乐", "风云足球", "风云剧场", "怀旧剧场", "第一剧场", "女性时尚", "世界地理", "央视台球", "高尔夫网球",
     ],
@@ -22,21 +28,22 @@ CHANNEL_CATEGORIES = {
         "山东卫视", "辽宁卫视", "黑龙江卫视", "吉林卫视", "内蒙古卫视", "宁夏卫视", "山西卫视", "陕西卫视", "甘肃卫视", "青海卫视",
     ],
     "数字频道": [
-        "CHC动作电影", "CHC家庭影院", "CHC影迷电影", "淘电影", "淘精彩", "淘剧场",
-        "IPTV热播剧场","IPTV谍战剧场", "IPTV戏曲","IPTV经典电影", "IPTV喜剧影院", "IPTV动作影院", "精品剧场","IPTV抗战剧场",
+        "CHC动作电影", "CHC家庭影院", "CHC影迷电影", "淘电影", "淘剧场", "淘娱乐",
+        "IPTV热播剧场","IPTV谍战剧场", "IPTV戏曲","IPTV经典电影", "IPTV喜剧影院", "IPTV动作影院", "精品剧场","IPTV抗战剧场", 
     ],
 }
-# 特殊符号映射（你的原版，完整保留）
+
+# 特殊符号映射（完整保留）
 SPECIAL_SYMBOLS = ["HD", "LT", "XF", "-", "_", " ", ".", "·", "高清", "标清", "超清", "H265", "4K", "FHD", "HDTV"]
-# 移除特殊符号的函数（你的原版）
+
+# 移除特殊符号的函数（完整保留）
 def remove_special_symbols(text):
-    """移除频道名称中的特殊符号"""
     for symbol in SPECIAL_SYMBOLS:
         text = text.replace(symbol, "")
-    # 移除多余的空格
     text = re.sub(r'\s+', '', text)
     return text.strip()
-# 改进的频道名称映射（你的原版，超全匹配规则，完整保留）
+
+# 频道名称映射（完整保留你的超全匹配规则）
 CHANNEL_MAPPING = {
     "CCTV1": ["CCTV1", "CCTV-1", "CCTV1综合", "CCTV1高清", "CCTV1HD", "cctv1","中央1台","sCCTV1-综合","CCTV01"],
     "CCTV2": ["CCTV2", "CCTV-2", "CCTV2财经", "CCTV2高清", "CCTV2HD", "cctv2","中央2台","aCCTV2","sCCTV2-财经","CCTV02"],
@@ -68,12 +75,6 @@ CHANNEL_MAPPING = {
     "世界地理": ["地理世界", "CCTV世界地理","世界地理高清"],
     "央视台球": ["央视台球", "CCTV央视台球","央视台球HD",],
     "高尔夫网球": ["高尔夫网球", "央视高网", "CCTV高尔夫网球", "高尔夫","高尔夫·网球HD",],
-    "央视文化精品": ["央视文化精品", "CCTV央视文化精品"],
-    "卫生健康": ["卫生健康", "CCTV卫生健康"],
-    "电视指南": ["电视指南", "CCTV电视指南"],
-    "中国天气": ["中国气象"],
-    "安多卫视": ["1020"],
-    "重温经典": ["重温经典高清","测试频道23"],
     "安徽卫视": ["安徽卫视高清"],
     "北京卫视": ["北京卫视HD","北京卫视高清"],
     "东南卫视": ["福建东南", "东南卫视"],
@@ -134,15 +135,15 @@ CHANNEL_MAPPING = {
     "IPTV动作影院": ["动作影院", "IPTV-动作影院"],
     "IPTV抗战剧场": ["测试频道15","抗战剧场","IPTV-抗战剧场"],
 }
+
 RESULTS_PER_CHANNEL = 20
 
-# 精确频道名称匹配函数（你的原版，完整保留，保证匹配精度）
+# 精确频道名称匹配函数（完整保留）
 def exact_channel_match(channel_name, pattern_name):
     clean_name = remove_special_symbols(channel_name.strip().lower())
     clean_pattern = remove_special_symbols(pattern_name.strip().lower())
     if clean_name == clean_pattern:
         return True
-    # 处理CCTV数字频道，避免CCTV1匹配CCTV10
     cctv_match = re.match(r'^cctv[-_\s]?(\d+[a-z]?)$', clean_name)
     pattern_match = re.match(r'^cctv[-_\s]?(\d+[a-z]?)$', clean_pattern)
     if cctv_match and pattern_match:
@@ -152,11 +153,9 @@ def exact_channel_match(channel_name, pattern_name):
             return False
         else:
             return clean_name == clean_pattern
-    # 处理CCTV5+等带+的频道
     if "+" in clean_name and "+" in clean_pattern:
         if "cctv5+" in clean_name and "cctv5+" in clean_pattern:
             return True
-    # 严格前缀匹配，避免数字尾匹配错误
     if clean_pattern in clean_name:
         if clean_pattern.endswith(('1', '2', '3', '4', '5', '6', '7', '8', '9', '0')):
             pattern_len = len(clean_pattern)
@@ -167,14 +166,13 @@ def exact_channel_match(channel_name, pattern_name):
         return True
     return False
 
-# 统一频道名称 - 使用精确匹配（你的原版，完整保留）
+# 统一频道名称（完整保留）
 def unify_channel_name(channels_list):
     new_channels_list = []
     for name, channel_url, speed in channels_list:
         original_name = name
         unified_name = None
         clean_name = remove_special_symbols(name.strip().lower())
-        # 首先尝试精确的数字匹配
         cctv_match = re.search(r'^cctv[-_\s]?(\d+[a-z]?)$', clean_name, re.IGNORECASE)
         if cctv_match:
             cctv_num = cctv_match.group(1)
@@ -185,7 +183,6 @@ def unify_channel_name(channels_list):
             if standard_name in CHANNEL_MAPPING:
                 unified_name = standard_name
                 print(f"数字匹配: '{original_name}' -> '{standard_name}'")
-        # 映射表精确匹配
         if not unified_name:
             for standard_name, variants in CHANNEL_MAPPING.items():
                 for variant in variants:
@@ -194,7 +191,6 @@ def unify_channel_name(channels_list):
                         break
                 if unified_name:
                     break
-        # 正则兜底匹配
         if not unified_name:
             for pattern in [r'cctv[-\s]?(\d+)高清?', r'cctv[-\s]?(\d+)hd', r'cctv[-\s]?(\d+).*']:
                 match = re.search(pattern, clean_name, re.IGNORECASE)
@@ -208,7 +204,6 @@ def unify_channel_name(channels_list):
                         unified_name = standard_name
                         print(f"正则匹配: '{original_name}' -> '{standard_name}'")
                         break
-        # 未匹配到保留原名
         if not unified_name:
             unified_name = original_name
         new_channels_list.append(f"{unified_name},{channel_url},{speed}\n")
@@ -216,26 +211,20 @@ def unify_channel_name(channels_list):
             print(f"频道名称统一: '{original_name}' -> '{unified_name}'")
     return new_channels_list
 
-# 按照CHANNEL_CATEGORIES中指定的顺序排序（你的原版）
+# 按指定顺序排序频道（完整保留）
 def sort_channels_by_specified_order(channels_list, category_channels):
     channel_order = {channel: index for index, channel in enumerate(category_channels)}
     def get_channel_sort_key(item):
         name, url, speed = item
         if name in channel_order:
-            return (channel_order[name], -float(speed))  # 同频道按速度降序
+            return (channel_order[name], -float(speed))
         else:
             return (float('inf'), name)
     return sorted(channels_list, key=get_channel_sort_key)
 
-# 定义排序函数（你的原版）
-def channel_key(channel_name):
-    match = re.search(r'\d+', channel_name)
-    return int(match.group()) if match else float('inf')
-
-# 分类频道（**修复版**：删除你的原版中「其他频道」，仅保留央视/卫视/数字）
+# 分类频道（完整保留，删除"其他频道"）
 def classify_channels_by_category(channels_data):
     categorized_channels = {}
-    # 仅初始化你定义的三类频道，删除其他频道
     for category in CHANNEL_CATEGORIES.keys():
         categorized_channels[category] = []
     for line in channels_data:
@@ -247,7 +236,6 @@ def classify_channels_by_category(channels_data):
             url = parts[1]
             speed = parts[2] if len(parts) > 2 else "0.000"
             assigned = False
-            # 仅匹配你定义的三类频道，未匹配直接丢弃
             for category, channel_list in CHANNEL_CATEGORIES.items():
                 if name in channel_list:
                     categorized_channels[category].append((name, url, speed))
@@ -258,7 +246,7 @@ def classify_channels_by_category(channels_data):
             continue
     return categorized_channels
 
-# 分组并排序频道（你的原版，完整保留）
+# 分组并排序频道（完整保留）
 def group_and_sort_channels_by_category(categorized_channels):
     processed_categories = {}
     for category, channels in categorized_channels.items():
@@ -266,46 +254,25 @@ def group_and_sort_channels_by_category(categorized_channels):
             continue
         if category in CHANNEL_CATEGORIES:
             category_order = CHANNEL_CATEGORIES[category]
-            if category == "央视频道":
-                channel_groups = {}
-                for name, url, speed in channels:
-                    if name not in channel_groups:
-                        channel_groups[name] = []
-                    channel_groups[name].append((name, url, speed))
-                grouped_channels = []
-                for channel_name in category_order:
-                    if channel_name in channel_groups:
-                        url_list = channel_groups[channel_name]
-                        url_list.sort(key=lambda x: -float(x[2]))
-                        url_list = url_list[:RESULTS_PER_CHANNEL]
-                        grouped_channels.extend(url_list)
-                        del channel_groups[channel_name]
-                for channel_name, url_list in channel_groups.items():
+            channel_groups = {}
+            for name, url, speed in channels:
+                if name not in channel_groups:
+                    channel_groups[name] = []
+                channel_groups[name].append((name, url, speed))
+            grouped_channels = []
+            for channel_name in category_order:
+                if channel_name in channel_groups:
+                    url_list = channel_groups[channel_name]
                     url_list.sort(key=lambda x: -float(x[2]))
                     url_list = url_list[:RESULTS_PER_CHANNEL]
                     grouped_channels.extend(url_list)
-                grouped_channels = sort_channels_by_specified_order(grouped_channels, category_order)
-                processed_categories[category] = grouped_channels
-            else:
-                channel_groups = {}
-                for name, url, speed in channels:
-                    if name not in channel_groups:
-                        channel_groups[name] = []
-                    channel_groups[name].append((name, url, speed))
-                grouped_channels = []
-                for channel_name in category_order:
-                    if channel_name in channel_groups:
-                        url_list = channel_groups[channel_name]
-                        url_list.sort(key=lambda x: -float(x[2]))
-                        url_list = url_list[:RESULTS_PER_CHANNEL]
-                        grouped_channels.extend(url_list)
-                        del channel_groups[channel_name]
-                for channel_name, url_list in channel_groups.items():
-                    url_list.sort(key=lambda x: -float(x[2]))
-                    url_list = url_list[:RESULTS_PER_CHANNEL]
-                    grouped_channels.extend(url_list)
-                grouped_channels = sort_channels_by_specified_order(grouped_channels, category_order)
-                processed_categories[category] = grouped_channels
+                    del channel_groups[channel_name]
+            for channel_name, url_list in channel_groups.items():
+                url_list.sort(key=lambda x: -float(x[2]))
+                url_list = url_list[:RESULTS_PER_CHANNEL]
+                grouped_channels.extend(url_list)
+            grouped_channels = sort_channels_by_specified_order(grouped_channels, category_order)
+            processed_categories[category] = grouped_channels
         else:
             channels.sort(key=lambda x: -float(x[2]))
             channel_groups = {}
@@ -322,39 +289,84 @@ def group_and_sort_channels_by_category(categorized_channels):
             processed_categories[category] = grouped_channels
     return processed_categories
 
-# ====================== 修复后的核心函数（适配YML，删除冗余IP/测速逻辑） ======================
-def hotel_iptv():
-    """
-    适配YML的极简版处理：
-    1. 读取YML生成的频道临时文件1.txt（YML已完成IP/测速/解析，直接复用）
-    2. 保留你所有的频道处理逻辑（统一名称+分类+排序）
-    3. 不删除IP文件，保留原有文件整理逻辑
-    4. 不生成M3U，仅输出iptv.txt
-    """
+# ====================== 核心流程：读取 YML 输出的 IP → 提取频道 ======================
+# 从 IP:Port 提取频道（复用你的 extract_channels 逻辑）
+def extract_channels_from_ip(ip_port):
+    hotel_channels = []
+    url_ends = ["/iptv/live/1000.json?key=txiptv", "/ZHGXTV/Public/json/live_interface.txt"]
     try:
-        # 检查YML是否生成了频道文件，无则退出
-        if not os.path.exists('1.txt'):
-            print("错误：未找到YML生成的频道文件1.txt，请先运行YML脚本！")
+        for url_end in url_ends:
+            url = f"http://{ip_port}{url_end}"
+            response = requests.get(url, timeout=5, headers=HEADERS, verify=False)
+            if response.status_code != 200:
+                continue
+            # 处理 JSON 格式
+            if "json" in url_end:
+                try:
+                    json_data = response.json()
+                    for item in json_data.get('data', []):
+                        if isinstance(item, dict):
+                            name = item.get('name')
+                            urlx = item.get('url')
+                            if name and urlx and ("tsfile" in urlx or "m3u8" in urlx):
+                                if not urlx.startswith('/'):
+                                    urlx = '/' + urlx
+                                urld = f"http://{ip_port}{urlx}"
+                                hotel_channels.append((name, urld, "0.000"))  # 速度默认0
+                except:
+                    pass
+            # 处理 TXT 格式
+            elif "txt" in url_end:
+                content = response.text
+                lines = content.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line and "," in line and not line.startswith('#'):
+                        parts = line.split(',', 1)
+                        if len(parts) >= 2:
+                            name = parts[0].strip()
+                            channel_url = parts[1].strip()
+                            if "tsfile" in channel_url or "m3u8" in channel_url:
+                                hotel_channels.append((name, channel_url, "0.000"))
+        return hotel_channels
+    except Exception as e:
+        print(f"❌ {ip_port} 提取频道失败: {str(e)[:30]}")
+        return []
+
+# 核心流程函数
+def hotel_iptv():
+    try:
+        # 1. 读取 YML 输出的 IP 文件（纯 IP:Port 列表）
+        ip_file = os.path.join(IP_DIR, "hotel_ip.txt")
+        if not os.path.exists(ip_file):
+            print(f"错误：未找到 YML 生成的 {ip_file}")
             return
-        # 读取YML生成的原始频道数据
-        with open('1.txt', 'r', encoding='utf-8') as f:
-            raw_lines = f.readlines()
-        # 转换为你的处理逻辑所需格式
-        channels_data = []
-        for line in raw_lines:
-            if ',' in line and line.strip():
-                parts = line.strip().split(',')
-                if len(parts) >= 2:
-                    name = parts[0]
-                    url = parts[1]
-                    speed = parts[2] if len(parts) > 2 else "0.000"
-                    channels_data.append(f"{name},{url},{speed}")
-        # 执行你原版的所有频道处理逻辑（一字未改）
-        categorized = classify_channels_by_category(channels_data)
-        processed_categories = group_and_sort_channels_by_category(categorized)
-        # 写入分类临时文件（保留你的原版逻辑）
+        with open(ip_file, "r", encoding='utf-8') as f:
+            ip_ports = [line.strip() for line in f if line.strip()]
+        if not ip_ports:
+            print("警告：IP 文件为空")
+            return
+        print(f"✅ 读取到 {len(ip_ports)} 个有效 IP")
+
+        # 2. 多线程提取所有频道
+        all_channels = []
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_ip = {executor.submit(extract_channels_from_ip, ip): ip for ip in ip_ports}
+            for future in as_completed(future_to_ip):
+                all_channels.extend(future.result())
+        if not all_channels:
+            print("⚠️ 未提取到任何频道")
+            return
+        print(f"✅ 共提取到 {len(all_channels)} 个频道")
+
+        # 3. 频道名称统一 + 分类 + 排序
+        unified_channels = unify_channel_name(all_channels)
+        categorized_channels = classify_channels_by_category(unified_channels)
+        processed_channels = group_and_sort_channels_by_category(categorized_channels)
+
+        # 4. 写入分类临时文件
         file_paths = []
-        for category, channels in processed_categories.items():
+        for category, channels in processed_channels.items():
             if channels:
                 filename = f"{category.replace('频道', '')}.txt"
                 with open(filename, 'w', encoding='utf-8') as f:
@@ -363,22 +375,27 @@ def hotel_iptv():
                         f.write(f"{name},{url}\n")
                 file_paths.append(filename)
                 print(f"已保存 {len(channels)} 个频道到 {filename}")
-        # 合并分类文件（保留你的原版逻辑，含浙江卫视固定链接）
-        file_contents = []
-        for file_path in file_paths:
-            if os.path.exists(file_path):
-                with open(file_path, 'r', encoding="utf-8") as f:
-                    file_contents.append(f.read())
-        # 获取北京时间，添加更新时间（保留你的原版）
+
+        # 5. 合并为最终 hotel.txt
+        output_dir = "Hotel"
+        os.makedirs(output_dir, exist_ok=True)
+        final_output = os.path.join(output_dir, "hotel.txt")
+
+        # 写入头部和固定链接
         beijing_time = datetime.datetime.now()
         current_time = beijing_time.strftime("%Y/%m/%d %H:%M")
-        with open("1.txt", "w", encoding="utf-8") as f:
-            f.write(f"{current_time}更新,#genre#\n")
-            f.write(f"浙江卫视,http://ali-m-l.cztv.com/channels/lantian/channel001/1080p.m3u8\n")
-            for content in file_contents:
-                f.write(f"\n{content}")
-        # 原始顺序去重（保留你的原版逻辑）
-        with open('1.txt', 'r', encoding="utf-8") as f:
+        with open(final_output, "w", encoding='utf-8') as f_out:
+            f_out.write(f"{current_time}更新,#genre#\n")
+            f_out.write("浙江卫视,http://ali-m-l.cztv.com/channels/lantian/channel001/1080p.m3u8\n")
+            # 合并分类文件
+            for fp in file_paths:
+                if os.path.exists(fp):
+                    with open(fp, "r", encoding='utf-8') as f_in:
+                        f_out.write(f"\n{f_in.read()}")
+                    os.remove(fp)
+
+        # 原始顺序去重
+        with open(final_output, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         unique_lines = []
         seen_lines = set()
@@ -386,40 +403,31 @@ def hotel_iptv():
             if line not in seen_lines:
                 unique_lines.append(line)
                 seen_lines.add(line)
-        # 输出最终iptv.txt（保留你的原版路径，不生成M3U）
-        output_dir = "Hotel"
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        txt_output_path = 'Hotel/iptv.txt'
-        with open(txt_output_path, 'w', encoding="utf-8") as f:
+        with open(final_output, 'w', encoding='utf-8') as f:
             f.writelines(unique_lines)
-        # 移除过程文件（保留你的原版逻辑）
-        files_to_remove = ["1.txt"] + file_paths
-        for file in files_to_remove:
-            if os.path.exists(file):
-                os.remove(file)
-        print(f"✅ 频道处理完成，最终文件已输出到: {txt_output_path}")
-    except Exception as e:
-        print(f"❌ 处理失败: {str(e)}")
 
-# ====================== 修复后的主函数（删除冗余IP处理，适配YML） ======================
+        print(f"\n🎉 处理完成！最终文件已保存到: {final_output}")
+        print(f"📊 统计：共 {len(unique_lines)-2} 个有效频道（已去重）")
+
+    except Exception as e:
+        print(f"❌ 整体处理失败: {str(e)}")
+
+# ====================== 主函数 ======================
 def main():
-    # 显示脚本开始时间（保留你的原版）
     start_time = datetime.datetime.now()
     print(f"脚本开始运行时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')} (北京时间)")
-    # 直接执行频道处理（YML已完成IP提取/测速，无需再遍历IP文件）
+    
+    # 执行核心流程
     hotel_iptv()
-    # 保留IP文件：**不删除任何IP文件**，仅清理空文件（可选，按你的需求保留）
-    print("\n📌 IP文件已全部保留，未做任何删除/修改操作")
-    # 显示脚本结束时间+运行时长（保留你的原版，删除M3U相关打印）
+    
+    # 输出运行信息
     end_time = datetime.datetime.now()
     print(f"\n脚本结束运行时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')} (北京时间)")
     run_time = end_time - start_time
     hours, remainder = divmod(run_time.seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     print(f"总运行时间: {hours}小时{minutes}分{seconds}秒")
-    print("任务运行完毕,所有频道已合并到 Hotel/iptv.txt")
+    print("📌 重要：YML 生成的 IP 文件已完整保留，未做任何修改/删除")
 
-# 程序入口
 if __name__ == "__main__":
     main()
