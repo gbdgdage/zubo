@@ -81,6 +81,7 @@ CHANNEL_MAPPING = {
     "陕西卫视": ["陕西卫视"],
 }
 
+# 关键修改1：将每个频道的地址限制从20改为50，避免目标IP频道被挤掉
 RESULTS_PER_CHANNEL = 50
 
 def exact_channel_match(channel_name, pattern_name):
@@ -164,6 +165,7 @@ def sort_channels_by_specified_order(channels_list, category_channels):
             return (float('inf'), name)
     return sorted(channels_list, key=get_channel_sort_key)
 
+# 关键修改2：修复CCTV误分到卫视频道的问题，优先归类央视频道
 def classify_channels_by_category(channels_data):
     categorized_channels = {}
     for category in CHANNEL_CATEGORIES.keys():
@@ -176,11 +178,17 @@ def classify_channels_by_category(channels_data):
             name = parts[0]
             url = parts[1]
             assigned = False
-            for category, channel_list in CHANNEL_CATEGORIES.items():
-                if name in channel_list:
-                    categorized_channels[category].append((name, url))
-                    assigned = True
-                    break
+            # 优先判断CCTV开头的频道，强制归入央视频道
+            if name.startswith("CCTV"):
+                categorized_channels["央视频道"].append((name, url))
+                assigned = True
+            else:
+                # 非CCTV频道按原有逻辑匹配分类
+                for category, channel_list in CHANNEL_CATEGORIES.items():
+                    if name in channel_list:
+                        categorized_channels[category].append((name, url))
+                        assigned = True
+                        break
         except Exception as e:
             print(f"分类频道时出错: {e}, 行: {line}")
             continue
@@ -236,7 +244,6 @@ def check_single_ip(ip_port, url_end):
     except:
         return None
 
-# ====================== 关键修改1：先处理ZHGXTV纯文本格式 ======================
 def extract_channels(url):
     hotel_channels = []
     try:
@@ -336,11 +343,11 @@ def hotel_iptv():
         
         output_dir = "Hotel"
         os.makedirs(output_dir, exist_ok=True)
-        final_output = os.path.join(output_dir, "iptv.txt")
+        # 关键修改3：输出文件名为 hotel.txt（原iptv.txt）
+        final_output = os.path.join(output_dir, "hotel.txt")
         beijing_time = datetime.datetime.now()
         current_time = beijing_time.strftime("%Y/%m/%d %H:%M")
         
-        # ====================== 关键修改2：按「频道名+IP」去重 ======================
         with open(final_output, "w", encoding='utf-8') as f_out:
             f_out.write(f"{current_time}更新,#genre#\n")
             for fp in file_paths:
@@ -389,7 +396,7 @@ def main():
     hours, remainder = divmod(run_time.seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     print(f"总运行时间: {hours}小时{minutes}分{seconds}秒")
-    print("📌 已移除测速+网段扫描 | 仅保留央视频道+卫视频道 | 仅输出txt格式 | 多IP共存不覆盖")
+    print("📌 已移除测速+网段扫描 | 仅保留央视频道+卫视频道 | 输出hotel.txt | 多IP共存不覆盖 | CCTV正确归类")
 
 if __name__ == "__main__":
     main()
