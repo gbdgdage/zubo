@@ -3,10 +3,8 @@ import re
 import datetime
 import requests
 from urllib3.exceptions import InsecureRequestWarning
-
 # 禁用不安全请求警告
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-
 # ====================== 配置区（精简+精准） ======================
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -14,7 +12,6 @@ HEADERS = {
 IP_DIR = "Hotel/ip"
 if not os.path.exists(IP_DIR):
     os.makedirs(IP_DIR)
-
 # 仅保留【央视频道+卫视频道】（严格控制分类，避免混淆）
 CHANNEL_CATEGORIES = {
     "央视频道": [
@@ -27,14 +24,12 @@ CHANNEL_CATEGORIES = {
         "山东卫视", "辽宁卫视", "黑龙江卫视", "吉林卫视", "内蒙古卫视", "山西卫视", "陕西卫视",
     ],
 }
-
 SPECIAL_SYMBOLS = ["HD", "LT", "XF", "-", "_", " ", ".", "·", "高清", "标清", "超清", "H265", "4K", "FHD", "HDTV"]
 def remove_special_symbols(text):
     for symbol in SPECIAL_SYMBOLS:
         text = text.replace(symbol, "")
     text = re.sub(r'\s+', '', text)
     return text.strip()
-
 # 精准频道映射（只保留核心变体，避免匹配混乱）
 CHANNEL_MAPPING = {
     "CCTV1": ["CCTV1", "CCTV-1", "CCTV1综合", "CCTV1高清", "CCTV1HD", "cctv1", "中央1台", "CCTV01"],
@@ -81,9 +76,7 @@ CHANNEL_MAPPING = {
     "山西卫视": ["山西卫视高清"],
     "陕西卫视": ["陕西卫视"],
 }
-
 RESULTS_PER_CHANNEL = 50  # 放宽限制，避免后续IP被挤掉
-
 def exact_channel_match(channel_name, pattern_name):
     clean_name = remove_special_symbols(channel_name.strip().lower())
     clean_pattern = remove_special_symbols(pattern_name.strip().lower())
@@ -95,7 +88,6 @@ def exact_channel_match(channel_name, pattern_name):
     if cctv_match and pattern_match:
         return cctv_match.group(1) == pattern_match.group(1)
     return False
-
 def unify_channel_name(channels_list):
     new_channels_list = []
     for name, channel_url in channels_list:
@@ -119,14 +111,12 @@ def unify_channel_name(channels_list):
             unified_name = original_name
         new_channels_list.append((unified_name, channel_url))  # 不添加换行，后续统一处理
     return new_channels_list
-
 def sort_channels_by_specified_order(channels_list, category_channels):
     channel_order = {channel: index for index, channel in enumerate(category_channels)}
     def get_channel_sort_key(item):
         name, url = item
         return (channel_order.get(name, float('inf')), name)
     return sorted(channels_list, key=get_channel_sort_key)
-
 # ====================== 核心修复：分类逻辑（参考正确代码，严格分组） ======================
 def classify_channels_by_category(channels_list):
     cctv_channels = []
@@ -144,7 +134,6 @@ def classify_channels_by_category(channels_list):
         "央视频道": cctv_channels,
         "卫视频道": satellite_channels
     }
-
 # ====================== IP访问与频道提取 ======================
 def check_single_ip(ip_port, url_end):
     try:
@@ -156,7 +145,6 @@ def check_single_ip(ip_port, url_end):
             return url
     except:
         return None
-
 def extract_channels(url):
     hotel_channels = []
     try:
@@ -190,7 +178,6 @@ def extract_channels(url):
     except Exception as e:
         print(f"解析频道错误 {url}: {str(e)[:30]}")
         return []
-
 # ====================== 主流程（参考正确输出结构，直接构建文件） ======================
 def hotel_iptv():
     try:
@@ -246,14 +233,17 @@ def hotel_iptv():
         cctv_unique = deduplicate(categorized_channels["央视频道"])
         satellite_unique = deduplicate(categorized_channels["卫视频道"])
         
-        # ====================== 参考正确输出，直接构建文件结构 ======================
+        # ====================== 关键修改：北京时间（缩进完全正确） ======================
+        import pytz  # 导入时区库（需确保安装 pytz）
+        beijing_tz = pytz.timezone("Asia/Shanghai")
+        current_time = datetime.datetime.now(beijing_tz).strftime("%Y/%m/%d %H:%M")
+        
         output_dir = "Hotel"
         os.makedirs(output_dir, exist_ok=True)
         final_output = os.path.join(output_dir, "hotel.txt")
-        current_time = datetime.datetime.now().strftime("%Y/%m/%d %H:%M")
         
         with open(final_output, "w", encoding='utf-8') as f_out:
-            # 写入头部
+            # 写入头部（已改为北京时间）
             f_out.write(f"{current_time}更新,#genre#\n\n")
             
             # 写入央视频道（分类行+频道，严格对应）
@@ -271,16 +261,17 @@ def hotel_iptv():
         print(f"📊 统计：央视频道 {len(cctv_unique)} 个 | 卫视频道 {len(satellite_unique)} 个")
     except Exception as e:
         print(f"❌ 整体处理失败: {str(e)}")
-
 def main():
-    start_time = datetime.datetime.now()
+    # 主函数时间也改为北京时间
+    import pytz
+    beijing_tz = pytz.timezone("Asia/Shanghai")
+    start_time = datetime.datetime.now(beijing_tz)
     print(f"脚本开始运行时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')} (北京时间)")
     hotel_iptv()
-    end_time = datetime.datetime.now()
+    end_time = datetime.datetime.now(beijing_tz)
     print(f"\n脚本结束运行时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')} (北京时间)")
     run_time = end_time - start_time
     print(f"总运行时间: {run_time.seconds // 60}分{run_time.seconds % 60}秒")
     print("📌 分类完全正确 | 输出hotel.txt | 无测速+无网段扫描 | 多IP共存")
-
 if __name__ == "__main__":
     main()
