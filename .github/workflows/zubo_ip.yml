@@ -96,40 +96,47 @@ jobs:
       - name: 2. 从 TV-yjc 同步IP（不覆盖）
         if: github.event.schedule == '0 17 * * *' || github.event_name == 'workflow_dispatch'
         run: |
-          git clone --depth 1 https://github.com/adminouyang/TV-yjc.git temp-tvyjc
+          # 备份当前 ip 目录
+          cp -r ip temp_ip || true
           mkdir -p ip
+
+          git clone --depth 1 https://github.com/adminouyang/TV-yjc.git temp-tvyjc
           cd ip
 
-          total_added=0
           while read src_file; do
             filename=$(basename "$src_file")
             dest="$filename"
             echo "正在处理: $filename"
 
             if [ -f "$dest" ]; then
-              added_lines=$(grep -xFf "$dest" "$src_file" -v | wc -l)
               grep -xFf "$dest" "$src_file" -v >> "$dest" || true
               awk '!seen[$0]++' "$dest" > "$dest.tmp" && mv "$dest.tmp" "$dest"
             else
               cp "$src_file" .
-              added_lines=$(wc -l < "$dest")
             fi
 
             sed -i '/^[[:space:]]*#/d' "$dest"
             sed -i '/无可用IP/d' "$dest"
-
-            total_added=$((total_added + added_lines))
-            if [ $added_lines -gt 0 ]; then
-              echo "  - $filename: +$added_lines 条"
-            fi
           done < <(find ../temp-tvyjc/IP_Scan/result_ip -type f -name "*.txt")
 
           rm -rf ../temp-tvyjc
+          cd ..
 
+          # 用 git diff 统计真实新增行数
           echo "====================================="
           echo "📊 TV-yjc IP 更新统计"
+          total_added=$(git diff --no-index temp_ip/ ip/ 2>/dev/null | grep -E '^\+' | grep -v '^+++' | wc -l)
           echo "新增IP总数: $total_added 条"
+          echo "更新文件列表:"
+          git diff --no-index temp_ip/ ip/ 2>/dev/null | grep -E '^\+' | grep -v '^+++' | awk -F: '{print $1}' | sort | uniq -c | while read count file; do
+            if [ "$count" -gt 0 ]; then
+              echo "  - $(basename "$file"): +$count 条"
+            fi
+          done
           echo "====================================="
+
+          # 清理备份
+          rm -rf temp_ip
 
       # ==============================================
       # 3. 原 IP_iptvz 任务（18:00 执行）
@@ -137,12 +144,13 @@ jobs:
       - name: 3. 从 iptvz 同步电信/联通IP
         if: github.event.schedule == '0 18 * * *' || github.event_name == 'workflow_dispatch'
         run: |
-          git clone --depth 1 https://github.com/q1017673817/iptvz.git temp-iptvz
+          cp -r ip temp_ip || true
           mkdir -p ip
+
+          git clone --depth 1 https://github.com/q1017673817/iptvz.git temp-iptvz
           cd ip
 
           CITY_LIST="北京 天津 上海 重庆"
-          total_added=0
           while read src_file; do
             filename=$(basename "$src_file")
             base="${filename/_ip.txt/}"
@@ -162,28 +170,31 @@ jobs:
             grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" "$src_file" > "$temp_file"
 
             if [ -f "$dest" ]; then
-              added_lines=$(grep -xFf "$dest" "$temp_file" -v | wc -l)
               grep -xFf "$dest" "$temp_file" -v >> "$dest" || true
               awk '!seen[$0]++' "$dest" > "$dest.tmp" && mv "$dest.tmp" "$dest"
             else
               cp "$temp_file" "$dest"
-              added_lines=$(wc -l < "$dest")
             fi
 
             rm -f "$temp_file"
-
-            total_added=$((total_added + added_lines))
-            if [ $added_lines -gt 0 ]; then
-              echo "  - $dest: +$added_lines 条"
-            fi
           done < <(find ../temp-iptvz/ip -type f -name "*联通_ip.txt" -o -name "*电信_ip.txt" | grep -v "存档_")
 
           rm -rf ../temp-iptvz
+          cd ..
 
           echo "====================================="
           echo "📊 iptvz IP 更新统计"
+          total_added=$(git diff --no-index temp_ip/ ip/ 2>/dev/null | grep -E '^\+' | grep -v '^+++' | wc -l)
           echo "新增IP总数: $total_added 条"
+          echo "更新文件列表:"
+          git diff --no-index temp_ip/ ip/ 2>/dev/null | grep -E '^\+' | grep -v '^+++' | awk -F: '{print $1}' | sort | uniq -c | while read count file; do
+            if [ "$count" -gt 0 ]; then
+              echo "  - $(basename "$file"): +$count 条"
+            fi
+          done
           echo "====================================="
+
+          rm -rf temp_ip
 
       # ==============================================
       # 统一提交推送（所有任务共用）
