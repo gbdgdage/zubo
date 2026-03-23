@@ -396,10 +396,14 @@ def third_stage():
     # 写 IPTV.txt（包含更新时间与分类）
     beijing_now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
     disclaimer_url = ""
+    # 统计北京、上海、四川可播放IP数量
+    bj_count = sum(1 for ip in playable_ips if "北京" in ip_info.get(ip, ""))
+    sh_count = sum(1 for ip in playable_ips if "上海" in ip_info.get(ip, ""))
+    sc_count = sum(1 for ip in playable_ips if "四川" in ip_info.get(ip, ""))
     try:
         with open(IPTV_FILE, "w", encoding="utf-8") as f:
             f.write(f"更新时间: {beijing_now}（北京时间）\n")
-            f.write(f"可播放 IP 共 {len(playable_ips)} 个\n\n")
+            f.write(f"可播放 IP 共 {len(playable_ips)} 个（北京{bj_count}个、上海{sh_count}个、四川{sc_count}个）\n\n")
             for category, ch_list in CHANNEL_CATEGORIES.items():
                 f.write(f"{category},#genre#\n")
                 for ch in ch_list:
