@@ -395,12 +395,11 @@ def third_stage():
     
     # 写 IPTV.txt（包含更新时间与分类）
     beijing_now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-    disclaimer_url = "http://kakaxi.indevs.in/LOGO/Disclaimer.mp4"
+    disclaimer_url = ""
     try:
         with open(IPTV_FILE, "w", encoding="utf-8") as f:
-            f.write(f"更新时间: {beijing_now}（北京时间）\n\n")
-            f.write("更新时间,#genre#\n")
-            f.write(f"{beijing_now},{disclaimer_url}\n\n")
+            f.write(f"更新时间: {beijing_now}（北京时间）\n")
+            f.write(f"可播放 IP 共 {len(playable_ips)} 个\n\n")
             for category, ch_list in CHANNEL_CATEGORIES.items():
                 f.write(f"{category},#genre#\n")
                 for ch in ch_list:
