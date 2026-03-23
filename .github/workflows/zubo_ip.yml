@@ -22,40 +22,33 @@ jobs:
       - name: 1. 从 kakaxi 下载并解析 IPTV
         if: github.event.schedule == '0 16 * * *' || github.event_name == 'workflow_dispatch'
         run: |
-          # 记录初始文件行数（用于统计更新数量）
           declare -A initial_counts
           for file in ./ip/*.txt; do
             [ -f "$file" ] && initial_counts["$file"]=$(wc -l < "$file") || initial_counts["$file"]=0
           done
 
-          # 下载源文件
           curl -L https://github.com/kakaxi-1/IPTV/raw/refs/heads/main/iptv.txt -o iptv.txt
 
-          # 定义直辖市列表
           CITY_LIST="北京 上海 天津 重庆"
-          new_ip_count=0  # 新增IP总数
+          new_ip_count=0
 
-          # 逐行解析
           while IFS= read -r line; do
             [[ -z "$line" ]] && continue
             url_part="${line%%$*}"
             label_part="${line##*$}"
 
-            # 提取 IP:端口
             if [[ $url_part =~ ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+) ]]; then
               ip_port="${BASH_REMATCH[1]}"
             else
               continue
             fi
 
-            # 提取省市运营商（去掉末尾数字）
             if [[ $label_part =~ ([^0-9]+)[0-9]+$ ]]; then
               province_operator="${BASH_REMATCH[1]}"
             else
               province_operator="$label_part"
             fi
 
-            # 分离省市和运营商
             if [[ $province_operator =~ (.*)(电信|移动|联通) ]]; then
               province_part="${BASH_REMATCH[1]}"
               operator="${BASH_REMATCH[2]}"
@@ -63,7 +56,6 @@ jobs:
               continue
             fi
 
-            # 直辖市加“市”
             if echo " $CITY_LIST " | grep -q " $province_part "; then
               target_province="${province_part}市"
             else
@@ -73,20 +65,16 @@ jobs:
             target_file="./ip/${target_province}${operator}.txt"
             touch "$target_file"
 
-            # 检查IP是否已存在，不存在则追加
             if ! grep -xFq "$ip_port" "$target_file"; then
               echo "$ip_port" >> "$target_file"
               new_ip_count=$((new_ip_count + 1))
             fi
 
-            # 去重
             sort -u "$target_file" -o "$target_file"
           done < iptv.txt
 
-          # 清理临时文件
           rm -f iptv.txt
 
-          # 输出统计结果
           echo "====================================="
           echo "📊 kakaxi IP 更新统计"
           echo "新增IP总数: $new_ip_count 条"
@@ -108,57 +96,45 @@ jobs:
       - name: 2. 从 TV-yjc 同步IP（不覆盖）
         if: github.event.schedule == '0 17 * * *' || github.event_name == 'workflow_dispatch'
         run: |
-          # 记录初始文件行数
           declare -A initial_counts
           for file in ./ip/*.txt; do
             [ -f "$file" ] && initial_counts["$file"]=$(wc -l < "$file") || initial_counts["$file"]=0
           done
 
-          # 克隆目标仓库
           git clone --depth 1 https://github.com/adminouyang/TV-yjc.git temp-tvyjc
           mkdir -p ip
           cd ip
 
-          total_added=0  # 新增IP总数
-
-          # 遍历源文件
-          find ../temp-tvyjc/IP_Scan/result_ip -type f -name "*.txt" | while read src_file; do
+          total_added=0
+          while read src_file; do
             filename=$(basename "$src_file")
             dest="$filename"
             echo "正在处理: $filename"
 
-            # 记录单个文件初始行数
             file_initial=${initial_counts["../ip/$dest"]:-0}
 
             if [ -f "$dest" ]; then
-              # 追加不存在的行
               added_lines=$(grep -xFf "$dest" "$src_file" -v | wc -l)
               grep -xFf "$dest" "$src_file" -v >> "$dest" || true
-              # 去重
               awk '!seen[$0]++' "$dest" > "$dest.tmp" && mv "$dest.tmp" "$dest"
             else
-              # 新建文件
               cp "$src_file" .
               added_lines=$(wc -l < "$dest")
             fi
 
-            # 删除注释和无效行
             sed -i '/^[[:space:]]*#/d' "$dest"
             sed -i '/无可用IP/d' "$dest"
 
-            # 统计单个文件新增数
             file_final=$(wc -l < "$dest")
             file_added=$((file_final - file_initial))
             total_added=$((total_added + file_added))
             if [ $file_added -gt 0 ]; then
               echo "  - $filename: +$file_added 条"
             fi
-          done
+          done < <(find ../temp-tvyjc/IP_Scan/result_ip -type f -name "*.txt")
 
-          # 清理临时目录
           rm -rf ../temp-tvyjc
 
-          # 输出统计结果
           echo "====================================="
           echo "📊 TV-yjc IP 更新统计"
           echo "新增IP总数: $total_added 条"
@@ -170,30 +146,23 @@ jobs:
       - name: 3. 从 iptvz 同步电信/联通IP
         if: github.event.schedule == '0 18 * * *' || github.event_name == 'workflow_dispatch'
         run: |
-          # 记录初始文件行数
           declare -A initial_counts
           for file in ./ip/*.txt; do
             [ -f "$file" ] && initial_counts["$file"]=$(wc -l < "$file") || initial_counts["$file"]=0
           done
 
-          # 克隆源仓库
           git clone --depth 1 https://github.com/q1017673817/iptvz.git temp-iptvz
           mkdir -p ip
           cd ip
 
           CITY_LIST="北京 天津 上海 重庆"
-          total_added=0  # 新增IP总数
-
-          # 遍历电信/联通IP文件（排除存档）
-          find ../temp-iptvz/ip -type f \
-            -name "*联通_ip.txt" -o -name "*电信_ip.txt" \
-            | grep -v "存档_" | while read src_file; do
+          total_added=0
+          while read src_file; do
             filename=$(basename "$src_file")
             base="${filename/_ip.txt/}"
             province_part="${base:0:2}"
             operator_part="${base:2}"
 
-            # 直辖市加“市”
             if echo " $CITY_LIST " | grep -q " $province_part "; then
               target_province="${province_part}市"
             else
@@ -203,40 +172,30 @@ jobs:
             dest="${target_province}${operator_part}.txt"
             echo "处理: $filename → $dest"
 
-            # 记录单个文件初始行数
             file_initial=${initial_counts["../ip/$dest"]:-0}
             temp_file=$(mktemp)
-
-            # 提取有效IP:端口（过滤非IP:端口行）
             grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+" "$src_file" > "$temp_file"
 
             if [ -f "$dest" ]; then
-              # 追加不存在的IP
               added_lines=$(grep -xFf "$dest" "$temp_file" -v | wc -l)
               grep -xFf "$dest" "$temp_file" -v >> "$dest" || true
-              # 去重
               awk '!seen[$0]++' "$dest" > "$dest.tmp" && mv "$dest.tmp" "$dest"
             else
-              # 新建文件
               cp "$temp_file" "$dest"
               added_lines=$(wc -l < "$dest")
             fi
 
-            # 统计单个文件新增数
             file_final=$(wc -l < "$dest")
             file_added=$((file_final - file_initial))
             total_added=$((total_added + file_added))
             if [ $file_added -gt 0 ]; then
               echo "  - $dest: +$file_added 条"
             fi
-
             rm -f "$temp_file"
-          done
+          done < <(find ../temp-iptvz/ip -type f -name "*联通_ip.txt" -o -name "*电信_ip.txt" | grep -v "存档_")
 
-          # 清理临时目录
           rm -rf ../temp-iptvz
 
-          # 输出统计结果
           echo "====================================="
           echo "📊 iptvz IP 更新统计"
           echo "新增IP总数: $total_added 条"
@@ -255,7 +214,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "✅ 无新IP更新，无需提交"
           else
-            # 根据定时时间生成提交信息
             if [ "${{ github.event.schedule }}" == "0 16 * * *" ]; then
               commit_msg="从kakaxi更新IP"
             elif [ "${{ github.event.schedule }}" == "0 17 * * *" ]; then
