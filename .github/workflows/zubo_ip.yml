@@ -1,4 +1,4 @@
-name: 合并IP更新（kakaxi + TV-yjc + iptvz）
+name: zubo_ip
 on:
   schedule:
     - cron: '0 16 * * *'  # 原 kakaxi_ip 时间
