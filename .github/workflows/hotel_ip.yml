@@ -491,7 +491,7 @@ jobs:
                 for i, (ip_port, (speed, stable, quality)) in enumerate(speed_tested_ips[:show_num], 1):
                     stable_tag = "✅" if stable else "❌"
                     print(f"  {i:2d}. {ip_port} - {stable_tag} 速度: {speed:.2f} KB/s 质量: {quality}分")
-                if len(speed_tested_ips) > 20:
+                if len(speed_tested_ips) > show_num:
                     print(f"  ... 还有 {len(speed_tested_ips)-40} 个达标IP端口")
             else:
                 print("\n警告: 没有找到真实播放速度达标的IP端口")
