@@ -244,7 +244,7 @@ def hotel_iptv():
         
         with open(final_output, "w", encoding='utf-8') as f_out:
             # 写入头部（已改为北京时间）
-            f_out.write(f"{current_time}更新,#genre#\n\n")
+            f_out.write(f"{current_time}更新\n\n")
             
             # 写入央视频道（分类行+频道，严格对应）
             f_out.write("央视频道,#genre#\n")
