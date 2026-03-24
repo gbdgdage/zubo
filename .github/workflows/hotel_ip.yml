@@ -153,8 +153,8 @@ jobs:
                                       if name and urlx:
                                           if not urlx.startswith('/'):
                                               urlx = '/' + urlx
-                                          urld = f"http://{ip_port}{urlx}"
-                                          hotel_channels.append((name, urld))
+                                              urld = f"http://{ip_port}{urlx}"
+                                              hotel_channels.append((name, urld))
                       except json.JSONDecodeError:
                           pass
                   
@@ -486,15 +486,15 @@ jobs:
               print("="*60)
               
               if speed_tested_ips:
-                print(f"\n真实播放速度达标IP端口 (稳定优先 → 速度降序):")
-                show_num = min(40, len(speed_tested_ips))
-                for i, (ip_port, (speed, stable, quality)) in enumerate(speed_tested_ips[:show_num], 1):
-                    stable_tag = "✅" if stable else "❌"
-                    print(f"  {i:2d}. {ip_port} - {stable_tag} 速度: {speed:.2f} KB/s 质量: {quality}分")
-                if len(speed_tested_ips) > show_num:
-                    print(f"  ... 还有 {len(speed_tested_ips)-40} 个达标IP端口")
-            else:
-                print("\n警告: 没有找到真实播放速度达标的IP端口")
+                  print(f"\n真实播放速度达标IP端口 (稳定优先 → 速度降序):")
+                  show_num = min(40, len(speed_tested_ips))
+                  for i, (ip_port, (speed, stable, quality)) in enumerate(speed_tested_ips[:show_num], 1):
+                      stable_tag = "✅" if stable else "❌"
+                      print(f"  {i:2d}. {ip_port} - {stable_tag} 速度: {speed:.2f} KB/s 质量: {quality}分")
+                  if len(speed_tested_ips) > show_num:
+                      print(f"  ... 还有 {len(speed_tested_ips)-show_num} 个达标IP端口")
+              else:
+                  print("\n警告: 没有找到真实播放速度达标的IP端口")
           
           if __name__ == "__main__":
               import urllib3
