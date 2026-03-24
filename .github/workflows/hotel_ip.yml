@@ -484,6 +484,17 @@ jobs:
               print(f"  - 稳定流畅流: {len([x for x in speed_tested_ips if x[1][1]])} 个")
               print(f"  - 结果已保存到: {output_file}")
               print("="*60)
+              
+              if speed_tested_ips:
+                print(f"\n真实播放速度达标IP端口 (稳定优先 → 速度降序):")
+                show_num = min(40, len(speed_tested_ips))
+                for i, (ip_port, (speed, stable, quality)) in enumerate(speed_tested_ips[:show_num], 1):
+                    stable_tag = "✅" if stable else "❌"
+                    print(f"  {i:2d}. {ip_port} - {stable_tag} 速度: {speed:.2f} KB/s 质量: {quality}分")
+                if len(speed_tested_ips) > 20:
+                    print(f"  ... 还有 {len(speed_tested_ips)-40} 个达标IP端口")
+            else:
+                print("\n警告: 没有找到真实播放速度达标的IP端口")
           
           if __name__ == "__main__":
               import urllib3
