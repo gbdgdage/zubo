@@ -295,10 +295,10 @@ jobs:
                   return False, [], 0.0, 0.0, []
           
           def merged_stream_test(channel_url):
-              """合并后的测速方法 - 4s/5s分片专属：3s内下载达标+低波动"""
+              """合并后的测速方法 - 4s/5s分片专属：6s内下载达标+低波动"""
               try:
                   has_stream, urls, avg_cost, cost_dev, ts_costs = smart_ts_detection(channel_url)
-                  # 核心判定：流可用+平均耗时≤3s+无单分片超3s+波动≤1.5s
+                  # 核心判定：流可用+平均耗时≤6s+无单分片超6s+波动≤1.5s
                   if not has_stream:
                       return False, 0.0, False, 0, "流不可用", 0.0, []
                   if avg_cost > MAX_TS_COST:
@@ -309,10 +309,10 @@ jobs:
                       return False, avg_cost, False, 0, f"耗时波动{cost_dev}＞{COST_DEV_THRESH}（忽快忽慢）", cost_dev, ts_costs
                   
                   # 按耗时+波动判定质量分和稳定性
-                  if avg_cost <= 1.5 and cost_dev <= 0.8:
+                  if avg_cost <= 3 and cost_dev <= 0.8:
                       quality = 95
                       stable = True
-                  elif avg_cost <= 2.5 and cost_dev <= 1.2:
+                  elif avg_cost <= 4.5 and cost_dev <= 1.2:
                       quality = 80
                       stable = True
                   elif avg_cost <= MAX_TS_COST and cost_dev <= COST_DEV_THRESH:
@@ -329,46 +329,40 @@ jobs:
                       quality += 3
                   quality = min(100, quality)
                   
-                  return True, avg_cost, stable, quality, "检测通过(3s内下载，播放流畅)", cost_dev, ts_costs
+                  return True, avg_cost, stable, quality, "检测通过(6s内下载，播放流畅)", cost_dev, ts_costs
               except Exception as e:
                   return False, 0.0, False, 0, f"检测失败: {str(e)[:20]}", 0.0, []
           
           def batch_stream_test(ip_port, channels):
-              """批量测试频道 - 4s/5s分片专属测速"""
-              best_cost = 999.99
+              """批量测试频道 - 仅测试1个首个CCTV频道（取消2、3频道检测）"""
+              best_cost = None  # 修复999.99：初始化为None，而非固定值
               best_stable = False
               best_quality = 0
               best_dev = 999.99
               tested = 0
               
-              # 优先测试CCTV频道
+              # 优先测试CCTV频道，仅取第一个
               priority_channels = []
-              other_channels = []
-              for name, url in channels[:5]:
-                  if name.upper() in ['CCTV-1', 'CCTV1', 'CCTV-1综合']:
-                      priority_channels.insert(0, (name, url))
-                  elif 'CCTV' in name.upper():
+              for name, url in channels:
+                  if "CCTV" in name.upper():
                       priority_channels.append((name, url))
-                  else:
-                      other_channels.append((name, url))
-              test_channels = priority_channels + other_channels
+                      break  # 仅保留第一个CCTV频道，直接退出循环
+              # 无CCTV频道则取第一个任意频道
+              test_channel = priority_channels[0] if priority_channels else (channels[0] if channels else None)
               
-              # 测试前3个频道
-              for channel_name, channel_url in test_channels[:3]:
+              # 仅测试1个频道
+              if test_channel:
                   tested += 1
+                  channel_name, channel_url = test_channel
                   available, cost, stable, quality, diagnosis, cost_dev, ts_costs = merged_stream_test(channel_url)
                   if not available:
                       print(f"      {channel_name}: ❌ {diagnosis} | 分片耗时: {ts_costs} | 波动: {cost_dev}")
-                      continue
-                  print(f"      {channel_name}: ✅ {diagnosis} | 平均耗时: {cost}秒 | 分片耗时: {ts_costs} | 波动: {cost_dev} | 质量: {quality}分")
-                  # 更新最优结果：耗时越短越优
-                  if quality > best_quality or (quality == best_quality and cost < best_cost):
+                  else:
+                      print(f"      {channel_name}: ✅ {diagnosis} | 平均耗时: {cost}秒 | 分片耗时: {ts_costs} | 波动: {cost_dev} | 质量: {quality}分")
                       best_cost = cost
                       best_stable = stable
                       best_quality = quality
                       best_dev = cost_dev
-                  if quality >= 80:  # 高质量稳定流直接终止测试
-                      break
               
               return best_cost, best_stable, best_quality, tested, best_dev
           
@@ -426,7 +420,7 @@ jobs:
                   for ip_port in ip_port_list:
                       available_ips.append((ip_port, f"http://{ip_port}/iptv/live/1000.json?key=txiptv"))
               
-              print(f"\n步骤3: 从可用IP解析频道信息并按4s/5s分片测速...")
+              print(f"\n步骤3: 从可用IP解析频道信息并按4s/5s分片测速（仅测1个频道）...")
               speed_tested_ips = []
               for idx, (ip_port, interface_url) in enumerate(available_ips, 1):
                   try:
@@ -440,15 +434,15 @@ jobs:
                           print(f"    {ip_port}: 无频道信息，跳过")
                           continue
                       cctv_channels = [(name, url) for name, url in channels if "CCTV" in name.upper()] or channels
-                      print(f"    {ip_port}: 找到 {len(cctv_channels)} 个频道，开始测速...")
+                      print(f"    {ip_port}: 找到 {len(cctv_channels)} 个频道，仅测1个核心频道...")
                       best_cost, best_stable, best_quality, tested_count, best_dev = batch_stream_test(ip_port, cctv_channels)
-                      if tested_count == 0:
-                          print(f"    {ip_port}: 所有频道测试失败，跳过")
+                      if tested_count == 0 or best_cost is None:  # 判定无有效耗时
+                          print(f"    {ip_port}: 测试失败 | 无有效分片下载耗时（流失效/超时）")
                           continue
                       if best_cost <= MAX_TS_COST:
                           speed_tested_ips.append((ip_port, (best_cost, best_stable, best_quality, best_dev)))
                           stable_tag = "✅稳定" if best_stable else "❌不稳定"
-                          print(f"    {ip_port}: {stable_tag} 4s/5s分片适配 | 下载耗时: {best_cost:.2f}秒(≤3s达标) | 波动: {best_dev:.2f} | 质量: {best_quality}分")
+                          print(f"    {ip_port}: {stable_tag} 4s/5s分片适配 | 下载耗时: {best_cost:.2f}秒(≤6s达标) | 波动: {best_dev:.2f} | 质量: {best_quality}分")
                       else:
                           print(f"    {ip_port}: 测试失败 | 耗时: {best_cost:.2f}秒 (超{MAX_TS_COST}秒卡顿阈值)")
                   except Exception as e:
@@ -456,7 +450,7 @@ jobs:
               
               # 排序规则：稳定优先 → 耗时升序（越短越优） → 波动升序（越小越稳）
               speed_tested_ips.sort(key=lambda x: (not x[1][1], x[1][0], x[1][3]))
-              print(f"\n步骤4: 保存通过3s耗时测速的IP端口...")
+              print(f"\n步骤4: 保存通过6s耗时测速的IP端口...")
               output_dir = "Hotel/ip"
               os.makedirs(output_dir, exist_ok=True)
               output_file = os.path.join(output_dir, "hotel_ip.txt")
@@ -466,14 +460,14 @@ jobs:
               if not speed_tested_ips:
                   with open(output_file, 'w', encoding='utf-8') as f:
                       for ip_port, _ in available_ips:
-                          f.write(f"{ip_port}  # 未通过3s分片下载耗时测速\n")
+                          f.write(f"{ip_port}  # 未通过6s分片下载耗时测速\n")
               
               # 输出统计结果
               print(f"\n" + "="*80)
-              print(f"处理完成统计【4s/5s分片专属规则：单分片≤3s下载 | 波动≤1.5s | 测试{TEST_TS_NUM}个分片】")
+              print(f"处理完成统计【4s/5s分片专属规则：单分片≤6s下载 | 波动≤1.5s | 仅测1个核心频道】")
               print(f"  - 初始提取IP端口: {len(ip_port_set)} 个")
               print(f"  - 可用IP端口: {len(available_ips)} 个")
-              print(f"  - 测速达标IP端口(3s内+低波动): {len(speed_tested_ips)} 个")
+              print(f"  - 测速达标IP端口(6s内+低波动): {len(speed_tested_ips)} 个")
               print(f"  - 真正稳定流(无波动/低波动): {len([x for x in speed_tested_ips if x[1][1]])} 个")
               print(f"  - 结果已保存到: {output_file}")
               print("="*80)
@@ -488,7 +482,7 @@ jobs:
                   if len(speed_tested_ips) > show_num:
                       print(f"  ... 还有 {len(speed_tested_ips)-show_num} 个达标IP端口")
               else:
-                  print(f"\n警告: 未找到满足【4s/5s分片3s内下载+低波动】的有效IP端口")
+                  print(f"\n警告: 未找到满足【4s/5s分片6s内下载+低波动】的有效IP端口")
           
           if __name__ == "__main__":
               import urllib3
