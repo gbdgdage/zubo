@@ -38,10 +38,10 @@ jobs:
           from urllib.parse import urlparse, urljoin
           from concurrent.futures import ThreadPoolExecutor, as_completed
           
-          # 测速配置项【适配4s/5s分片：超3s下载=卡顿，核心阈值】
-          DETECT_TIMEOUT = 5    # 单分片最大下载硬超时（秒）
+          # 测速配置项【适配4s/5s分片：超6s下载=卡顿，核心阈值】
+          DETECT_TIMEOUT = 8    # 单分片最大下载硬超时（秒）
           TEST_TS_NUM = 3       # 测试分片数
-          MAX_TS_COST = 3       # 核心达标阈值：单分片下载≤3s才流畅
+          MAX_TS_COST = 6       # 核心达标阈值：单分片下载≤6s才流畅
           COST_DEV_THRESH = 1.5 # 耗时波动阈值：≤1.5s，避免忽快忽慢
           MIN_CHUNK_SIZE = 512  # 最小有效分片大小（字节）
           
