@@ -363,7 +363,7 @@ jobs:
               """主函数：提取IP端口+统计耗时，取消阈值，所有有效IP按耗时升序排序"""
               ip_port_set = set()
               
-              print("步骤1: 从直播源URL提取IP和端口...")
+              print("步骤1: 从直播源URL提取含hls/、tsfile/live/的IP和端口...")
               for url in url_list:
                   try:
                       response = requests.get(url, timeout=15, headers=HEADERS, verify=False)
@@ -379,7 +379,8 @@ jobs:
                               continue
                           url_part = parts[1].strip()
                           match = re.search(r'https?://([^:/]+):(\d+)', url_part)
-                          if match:
+                          # 核心修改：仅提取含hls/ 或 tsfile/live/的IP:端口
+                          if match and ('hls/' in url_part or 'tsfile/live/' in url_part):
                               ip = match.group(1)
                               port = match.group(2)
                               if not ip.startswith(('10.', '172.16.', '192.168.', '127.')):
@@ -388,7 +389,7 @@ jobs:
                   except Exception as e:
                       print(f"处理URL {url} 时发生错误: {e}")
               
-              print(f"共提取到 {len(ip_port_set)} 个IP:端口")
+              print(f"共提取到 {len(ip_port_set)} 个含hls/、tsfile/live/的IP:端口")
               ip_port_list = list(ip_port_set)
               
               print(f"\n步骤2: 检测IP端口有效性...")
@@ -456,7 +457,7 @@ jobs:
               
               # 输出统计结果
               print(f"\n" + "="*80)
-              print(f"处理完成统计【无阈值判定 | 仅测1个核心频道 | 按下载耗时升序排序】")
+              print(f"处理完成统计【仅提取hls/、tsfile/live/ | 无阈值判定 | 仅测1个核心频道 | 按下载耗时升序排序】")
               print(f"  - 初始提取IP端口: {len(ip_port_set)} 个")
               print(f"  - 可用IP端口: {len(available_ips)} 个")
               print(f"  - 有效IP端口(获取到下载耗时): {len(speed_tested_ips)} 个")
@@ -483,7 +484,8 @@ jobs:
                   "https://raw.githubusercontent.com/jn950/live/refs/heads/main/tv/holive.m3u",
                   "https://raw.githubusercontent.com/whyun-pages/hotel-tvn/refs/heads/main/lives.txt",
                   "https://raw.githubusercontent.com/mzky/checklist/refs/heads/master/itvlist.m3u",
-                  "https://github.com/adminouyang/TV-yjc/raw/refs/heads/main/Hotel/iptv.txt"
+                  "https://github.com/adminouyang/TV-yjc/raw/refs/heads/main/Hotel/iptv.txt",
+                  "https://github.com/yyyr-otz/iptv-api/raw/refs/heads/master/output/ipv4/result.txt"
               ]
               hotel_ip_port_from_urls(urls)
           EOF
