@@ -23,7 +23,7 @@ jobs:
           pip install requests
           pip install pysocks
         
-      - name: 提取ip_port
+      - name: 提取ip_port（新增FOFA搜索iptv/live/相关IP）
         run: |
           cat > hotel_ip_port.py << 'EOF'
           import requests
@@ -38,6 +38,13 @@ jobs:
           from urllib.parse import urlparse, urljoin
           from concurrent.futures import ThreadPoolExecutor, as_completed
           
+          # FOFA配置 - 搜索iptv/live/zh_cn.js相关，提取IP:端口（适配原有1000.json接口）
+          FOFA_URL = "https://fofa.info/result?qbase64=ImlwdHYvbGl2ZS96aF9jbi5qcyIgJiYgY291bnRyeT0iQ04i"
+          FOFA_HEADERS = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+              "Referer": "https://fofa.info/",
+              "Accept-Language": "zh-CN,zh;q=0.9"
+          }
           # 测速配置项【仅保留基础配置，取消所有耗时阈值】
           DETECT_TIMEOUT = 8    # 单分片最大下载硬超时（秒）
           TEST_TS_NUM = 3       # 测试分片数
@@ -53,6 +60,30 @@ jobs:
               'Accept-Encoding': 'gzip, deflate',
           }
           
+          def fofa_crawl_ip():
+              """从FOFA搜索iptv/live/相关，提取公网IP:端口（适配原有1000.json接口）"""
+              ip_port_set = set()
+              print("【FOFA爬取】开始搜索iptv/live/相关IP:端口...")
+              try:
+                  resp = requests.get(FOFA_URL, headers=FOFA_HEADERS, timeout=20, verify=False)
+                  if resp.status_code != 200:
+                      print(f"【FOFA爬取】请求失败，状态码: {resp.status_code}")
+                      return ip_port_set
+                  # 匹配FOFA页面中的http://IP:PORT链接，与原有提取规则一致
+                  ip_port_matches = re.findall(r'<a href="http://([\d\.]+:\d+)"', resp.text)
+                  if not ip_port_matches:
+                      print("【FOFA爬取】未匹配到任何IP:端口")
+                      return ip_port_set
+                  # 过滤内网IP，保留公网IP，与原有过滤规则完全一致
+                  for ip_port in ip_port_matches:
+                      ip = ip_port.split(':')[0]
+                      if not ip.startswith(('10.', '172.16.', '192.168.', '127.', '169.254.')):
+                          ip_port_set.add(ip_port)
+                  print(f"【FOFA爬取】完成，提取到公网IP:端口共 {len(ip_port_set)} 个")
+              except Exception as e:
+                  print(f"【FOFA爬取】异常: {str(e)[:50]}")
+              return ip_port_set
+          
           def check_tcp_connection(ip, port, timeout=3):
               """测试TCP连接是否可用"""
               try:
@@ -65,7 +96,7 @@ jobs:
                   return False
           
           def check_ip_availability(ip_port, timeout=5):
-              """检测IP:端口是否可用"""
+              """检测IP:端口是否可用（完全保留原有逻辑，适配1000.json接口）"""
               try:
                   ip, port = ip_port.split(':')
                   
@@ -76,7 +107,7 @@ jobs:
                   
                   print(f"  {ip_port}: TCP连接成功")
                   
-                  # 尝试连接HTTP服务
+                  # 完全保留原有测试接口，无任何新增
                   test_urls = [
                       f"http://{ip_port}/iptv/live/1000.json?key=txiptv",
                       f"http://{ip_port}/ZHGXTV/Public/json/live_interface.txt",
@@ -133,7 +164,7 @@ jobs:
                   return False, None
           
           def hotel_channels_from_ip_port(ip_port, interface_url):
-              """从IP:端口的接口解析频道信息"""
+              """从IP:端口的接口解析频道信息（完全保留原有逻辑）"""
               hotel_channels = []
               try:
                   response = requests.get(interface_url, timeout=10, headers=HEADERS, verify=False)
@@ -360,10 +391,13 @@ jobs:
               return best_cost, best_stable, best_quality, tested, best_dev
           
           def hotel_ip_port_from_urls(url_list):
-              """主函数：提取IP端口+统计耗时，取消阈值，所有有效IP按耗时升序排序"""
-              ip_port_set = set()
+              """主函数：提取IP端口+统计耗时，新增FOFA IP合并，完全保留原有逻辑"""
+              # 第一步：从FOFA爬取iptv/live/相关IP:端口
+              fofa_ip_set = fofa_crawl_ip()
+              # 第二步：从原有直播源URL提取含hls/、tsfile/live/的IP和端口
+              url_ip_set = set()
               
-              print("步骤1: 从直播源URL提取含hls/、tsfile/live/的IP和端口...")
+              print("\n步骤1: 从直播源URL提取含hls/、tsfile/live/的IP和端口...")
               for url in url_list:
                   try:
                       response = requests.get(url, timeout=15, headers=HEADERS, verify=False)
@@ -384,12 +418,14 @@ jobs:
                               ip = match.group(1)
                               port = match.group(2)
                               if not ip.startswith(('10.', '172.16.', '192.168.', '127.')):
-                                  ip_port_set.add(f"{ip}:{port}")
+                                  url_ip_set.add(f"{ip}:{port}")
                       print(f"  从 {url} 提取完成")
                   except Exception as e:
                       print(f"处理URL {url} 时发生错误: {e}")
               
-              print(f"共提取到 {len(ip_port_set)} 个含hls/、tsfile/live/的IP:端口")
+              # 合并FOFA爬取的IP和原有提取的IP，自动去重，无任何额外处理
+              ip_port_set = fofa_ip_set.union(url_ip_set)
+              print(f"\n【合并去重】FOFA爬取{len(fofa_ip_set)}个 + 原有提取{len(url_ip_set)}个 = 总{len(ip_port_set)}个唯一IP:端口")
               ip_port_list = list(ip_port_set)
               
               print(f"\n步骤2: 检测IP端口有效性...")
@@ -414,7 +450,7 @@ jobs:
                   for ip_port in ip_port_list:
                       available_ips.append((ip_port, f"http://{ip_port}/iptv/live/1000.json?key=txiptv"))
               
-              print(f"\n步骤3: 从可用IP解析频道信息并统计下载耗时（仅测1个频道，无阈值淘汰）...")
+              print(f"\n步骤3: 从可用IP解析频道信息并统计下载耗时（仅测1个核心频道，无阈值淘汰）...")
               speed_tested_ips = []
               for idx, (ip_port, interface_url) in enumerate(available_ips, 1):
                   try:
@@ -455,10 +491,12 @@ jobs:
                       for ip_port, _ in available_ips:
                           f.write(f"{ip_port}  # 无有效下载耗时\n")
               
-              # 输出统计结果
+              # 输出统计结果，新增FOFA相关统计，其余完全保留
               print(f"\n" + "="*80)
-              print(f"处理完成统计【仅提取hls/、tsfile/live/ | 无阈值判定 | 仅测1个核心频道 | 按下载耗时升序排序】")
-              print(f"  - 初始提取IP端口: {len(ip_port_set)} 个")
+              print(f"处理完成统计【FOFA+原有提取 | 仅提取hls/、tsfile/live/ | 无阈值判定 | 仅测1个核心频道】")
+              print(f"  - FOFA爬取iptv/live/相关IP: {len(fofa_ip_set)} 个")
+              print(f"  - 直播源提取IP端口: {len(url_ip_set)} 个")
+              print(f"  - 合并去重后总IP: {len(ip_port_set)} 个")
               print(f"  - 可用IP端口: {len(available_ips)} 个")
               print(f"  - 有效IP端口(获取到下载耗时): {len(speed_tested_ips)} 个")
               print(f"  - 稳定流IP(低波动): {len([x for x in speed_tested_ips if x[1][1]])} 个")
