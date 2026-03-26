@@ -12,7 +12,7 @@ HEADERS = {
 IP_DIR = "Hotel/ip"
 if not os.path.exists(IP_DIR):
     os.makedirs(IP_DIR)
-# 仅保留【央视频道+卫视频道】（严格控制分类，避免混淆）
+# 仅保留【央视频道+卫视频道+数字频道】（严格控制分类，避免混淆）
 CHANNEL_CATEGORIES = {
     "央视频道": [
         "CCTV1", "CCTV2", "CCTV3", "CCTV4", "CCTV5", "CCTV5+", "CCTV6", "CCTV7",
@@ -29,13 +29,13 @@ CHANNEL_CATEGORIES = {
         "IPTV热播剧场","IPTV谍战剧场", "IPTV戏曲","IPTV经典电影", "IPTV喜剧影院", "IPTV动作影院", "精品剧场","IPTV抗战剧场", 
     ],
 }
-SPECIAL_SYMBOLS = ["HD", "LT", "XF", "-", "_", " ", ".", "·", "高清", "标清", "超清", "H265", "4K", "FHD", "HDTV"]
+SPECIAL_SYMBOLS = ["HD", "LT", "XF", "-", "_", " ", ".", "·", "高清", "标清", "超清", "H265", "4K", "FHD", "HDTV", "测试"]
 def remove_special_symbols(text):
     for symbol in SPECIAL_SYMBOLS:
         text = text.replace(symbol, "")
     text = re.sub(r'\s+', '', text)
     return text.strip()
-# 精准频道映射（只保留核心变体，避免匹配混乱）
+# 精准频道映射（只保留核心变体，避免匹配混乱，删除空键）
 CHANNEL_MAPPING = {
     "CCTV1": ["CCTV1", "CCTV-1", "CCTV1综合", "CCTV1高清", "CCTV1HD", "cctv1", "中央1台", "CCTV01"],
     "CCTV2": ["CCTV2", "CCTV-2", "CCTV2财经", "CCTV2高清", "CCTV2HD", "cctv2", "中央2台", "CCTV02"],
@@ -44,7 +44,7 @@ CHANNEL_MAPPING = {
     "CCTV5": ["CCTV5", "CCTV-5", "CCTV5体育", "CCTV5高清", "CCTV5HD", "cctv5", "中央5台", "CCTV05"],
     "CCTV5+": ["CCTV5+", "CCTV-5+", "CCTV5+体育赛事", "CCTV5+高清", "CCTV5+HD", "cctv5+", "CCTV5plus"],
     "CCTV6": ["CCTV6", "CCTV-6", "CCTV6电影", "CCTV6高清", "CCTV6HD", "cctv6", "中央6台", "CCTV06"],
-    "CCTV7": ["CCTV7", "CCTV-7", "CCTV7军事", "CCTV7高清", "CCTV7-军农", "CCTV7HD", "cctv7", "中央7台", "CCTV07"],
+    "CCTV7": ["CCTV7", "CCTV-7", "CCTV7军事", "CCTV7高清", "CCTV7-军农", "CCTV7HD", "cctv7", "中央7台", "CCTV07", "CCTV7国防军事"],
     "CCTV8": ["CCTV8", "CCTV-8", "CCTV8电视剧", "CCTV8高清", "CCTV8HD", "cctv8", "中央8台", "CCTV08"],
     "CCTV9": ["CCTV9", "CCTV-9", "CCTV9纪录", "CCTV9高清", "CCTV9HD", "cctv9", "中央9台", "CCTV09"],
     "CCTV10": ["CCTV10", "CCTV-10", "CCTV10科教", "CCTV10高清", "CCTV10HD", "cctv10", "中央10台"],
@@ -104,7 +104,6 @@ CHANNEL_MAPPING = {
     "IPTV热播剧场": ["IPTV-热播剧场","热播剧场"],
     "IPTV谍战剧场": ["IPTV-谍战剧场","谍战剧场"],
     "IPTV少儿动画": ["IPTV-少儿动画"],
-    "": [""],
     "IPTV经典电影": ["经典电影", "IPTV-经典电影"],
     "IPTV喜剧影院": ["喜剧影院", "IPTV-喜剧影院"],
     "IPTV动作影院": ["动作影院", "IPTV-动作影院"],
@@ -125,26 +124,31 @@ def exact_channel_match(channel_name, pattern_name):
     return False
 def unify_channel_name(channels_list):
     new_channels_list = []
+    # 仅保留CHANNEL_MAPPING中的标准频道，过滤未定义的频道
+    valid_standard_names = set(CHANNEL_MAPPING.keys())
     for name, channel_url in channels_list:
         original_name = name
         unified_name = None
         clean_name = remove_special_symbols(name.strip().lower())
+        # 过滤含海外/衍生关键词的频道
+        if any(key in original_name for key in ["欧洲", "美洲", "NEWS", "电视指南", "+"]):
+            continue
         # 优先匹配CCTV频道
         cctv_match = re.search(r'^cctv[-_\s]?(\d+[a-z]?)$', clean_name, re.IGNORECASE)
         if cctv_match:
             cctv_num = cctv_match.group(1)
             standard_name = "CCTV5+" if cctv_num == "5+" else f"CCTV{cctv_num}"
-            if standard_name in CHANNEL_MAPPING:
+            if standard_name in valid_standard_names:
                 unified_name = standard_name
-        # 匹配卫视频道
+        # 匹配卫视频道/数字频道
         if not unified_name:
             for standard_name, variants in CHANNEL_MAPPING.items():
                 if any(exact_channel_match(name, var) for var in variants):
                     unified_name = standard_name
                     break
-        if not unified_name:
-            unified_name = original_name
-        new_channels_list.append((unified_name, channel_url))  # 不添加换行，后续统一处理
+        # 仅添加已匹配到标准名称的频道
+        if unified_name and unified_name in valid_standard_names:
+            new_channels_list.append((unified_name, channel_url))
     return new_channels_list
 def sort_channels_by_specified_order(channels_list, category_channels):
     channel_order = {channel: index for index, channel in enumerate(category_channels)}
@@ -152,22 +156,27 @@ def sort_channels_by_specified_order(channels_list, category_channels):
         name, url = item
         return (channel_order.get(name, float('inf')), name)
     return sorted(channels_list, key=get_channel_sort_key)
-# ====================== 核心修复：分类逻辑（参考正确代码，严格分组） ======================
+# ====================== 核心修复：分类逻辑（新增数字频道，严格按配置分组） ======================
 def classify_channels_by_category(channels_list):
     cctv_channels = []
     satellite_channels = []
+    digital_channels = []
     # 直接按统一后的名称分类，不依赖中间文件
     for name, url in channels_list:
-        if name.startswith("CCTV"):
+        if name in CHANNEL_CATEGORIES["央视频道"]:
             cctv_channels.append((name, url))
         elif name in CHANNEL_CATEGORIES["卫视频道"]:
             satellite_channels.append((name, url))
+        elif name in CHANNEL_CATEGORIES["数字频道"]:
+            digital_channels.append((name, url))
     # 按指定顺序排序
     cctv_channels = sort_channels_by_specified_order(cctv_channels, CHANNEL_CATEGORIES["央视频道"])
     satellite_channels = sort_channels_by_specified_order(satellite_channels, CHANNEL_CATEGORIES["卫视频道"])
+    digital_channels = sort_channels_by_specified_order(digital_channels, CHANNEL_CATEGORIES["数字频道"])
     return {
         "央视频道": cctv_channels,
-        "卫视频道": satellite_channels
+        "卫视频道": satellite_channels,
+        "数字频道": digital_channels
     }
 # ====================== IP访问与频道提取 ======================
 def check_single_ip(ip_port, url_end):
@@ -213,7 +222,7 @@ def extract_channels(url):
     except Exception as e:
         print(f"解析频道错误 {url}: {str(e)[:30]}")
         return []
-# ====================== 主流程（参考正确输出结构，直接构建文件） ======================
+# ====================== 主流程（新增数字频道输出，过滤无效频道） ======================
 def hotel_iptv():
     try:
         ip_file = os.path.join(IP_DIR, "hotel_ip.txt")
@@ -247,10 +256,13 @@ def hotel_iptv():
         if not all_channels:
             print("⚠️ 未提取到任何频道")
             return
-        print(f"✅ 共提取到 {len(all_channels)} 个频道（无测速）")
+        print(f"✅ 共提取到 {len(all_channels)} 个原始频道（无测速）")
         
-        # 统一名称 + 分类 + 去重（按频道名+IP去重，不破坏分类）
+        # 统一名称 + 分类 + 去重（按频道名+IP去重，过滤无效频道）
         unified_channels = unify_channel_name(all_channels)
+        if not unified_channels:
+            print("⚠️ 无有效标准频道可输出")
+            return
         categorized_channels = classify_channels_by_category(unified_channels)
         
         # 去重逻辑（不影响分类结构）
@@ -267,8 +279,9 @@ def hotel_iptv():
         
         cctv_unique = deduplicate(categorized_channels["央视频道"])
         satellite_unique = deduplicate(categorized_channels["卫视频道"])
+        digital_unique = deduplicate(categorized_channels["数字频道"])
         
-        # ====================== 关键修改：北京时间（缩进完全正确） ======================
+        # ====================== 北京时间（缩进完全正确） ======================
         import pytz  # 导入时区库（需确保安装 pytz）
         beijing_tz = pytz.timezone("Asia/Shanghai")
         current_time = datetime.datetime.now(beijing_tz).strftime("%Y/%m/%d %H:%M")
@@ -282,18 +295,27 @@ def hotel_iptv():
             f_out.write(f"{current_time}更新\n\n")
             
             # 写入央视频道（分类行+频道，严格对应）
-            f_out.write("央视频道,#genre#\n")
-            for name, url in cctv_unique:
-                f_out.write(f"{name},{url}\n")
-            f_out.write("\n")  # 分类间空行分隔
+            if cctv_unique:
+                f_out.write("央视频道,#genre#\n")
+                for name, url in cctv_unique:
+                    f_out.write(f"{name},{url}\n")
+                f_out.write("\n")  # 分类间空行分隔
             
             # 写入卫视频道
-            f_out.write("卫视频道,#genre#\n")
-            for name, url in satellite_unique:
-                f_out.write(f"{name},{url}\n")
+            if satellite_unique:
+                f_out.write("卫视频道,#genre#\n")
+                for name, url in satellite_unique:
+                    f_out.write(f"{name},{url}\n")
+                f_out.write("\n")  # 分类间空行分隔
+            
+            # 新增：写入数字频道
+            if digital_unique:
+                f_out.write("数字频道,#genre#\n")
+                for name, url in digital_unique:
+                    f_out.write(f"{name},{url}\n")
         
         print(f"\n🎉 处理完成！最终文件已保存到: {final_output}")
-        print(f"📊 统计：央视频道 {len(cctv_unique)} 个 | 卫视频道 {len(satellite_unique)} 个")
+        print(f"📊 统计：央视频道 {len(cctv_unique)} 个 | 卫视频道 {len(satellite_unique)} 个 | 数字频道 {len(digital_unique)} 个")
     except Exception as e:
         print(f"❌ 整体处理失败: {str(e)}")
 def main():
@@ -307,6 +329,6 @@ def main():
     print(f"\n脚本结束运行时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')} (北京时间)")
     run_time = end_time - start_time
     print(f"总运行时间: {run_time.seconds // 60}分{run_time.seconds % 60}秒")
-    print("📌 分类完全正确 | 输出hotel.txt | 无测速+无网段扫描 | 多IP共存")
+    print("📌 分类完全正确 | 输出hotel.txt | 无测速+无网段扫描 | 多IP共存 | 数字频道已输出")
 if __name__ == "__main__":
     main()
