@@ -5,10 +5,10 @@ on:
     - cron: '0 16 * * *'
       id: fofa_task1
     # FOFA任务2：
-    - cron: '0 17 * * *'
+    - cron: '0 18 * * *'
       id: fofa_task2
     # IP同步任务：
-    - cron: '0 18 * * *'
+    - cron: '0 17 * * *'
       id: ip_sync
   workflow_dispatch:       # 手动触发，可选择执行全部/指定任务
     inputs:
