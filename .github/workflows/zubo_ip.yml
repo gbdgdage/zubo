@@ -1,10 +1,32 @@
 name: zubo_ip
 on:
   schedule:
-    - cron: '0 18 * * *'  # 仅保留一个定时时间，三个任务依次执行
-  workflow_dispatch:       # 保留手动触发
+    # FOFA任务1：
+    - cron: '0 16 * * *'
+      id: fofa_task1
+    # FOFA任务2：
+    - cron: '0 17 * * *'
+      id: fofa_task2
+    # IP同步任务：
+    - cron: '0 18 * * *'
+      id: ip_sync
+  workflow_dispatch:       # 手动触发，可选择执行全部/指定任务
+    inputs:
+      run_fofa1:
+        description: 是否执行FOFA任务1
+        type: boolean
+        default: false
+      run_fofa2:
+        description: 是否执行FOFA任务2
+        type: boolean
+        default: true
+      run_ip_sync:
+        description: 是否执行原IP同步（kakaxi/TV-yjc/iptvz）
+        type: boolean
+        default: true
+
 jobs:
-  merge-ip-updates:
+  ip-fofa-merge:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -13,10 +35,122 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
       # ==============================================
-      # 1. 原 kakaxi_ip 任务（第一个执行）
+      # 可扩展FOFA爬取模块 - 任务1
+      # 新增FOFA任务：复制此step，修改id/fofa_url/desc即可
       # ==============================================
-      - name: 1. 从 kakaxi 下载并解析 IPTV
+      - name: FOFA爬取-任务1
+        if: github.event.schedule.id == 'fofa_task1' || github.event.inputs.run_fofa1 == 'true'
+        env:
+          # FOFA链接1（base64查询语句）
+          FOFA_URL: "https://fofa.info/result?qbase64=InVkcHh5IiAmJiBjb3VudHJ5PSJDTiIgJiYgcmVnaW9uPSJTaWNodWFuIiAmJiBvcmc9IkNoaW5hbmV0Igo="
+          FOFA_DESC: "FOFA链接1"
+        run: |
+          echo "📡 开始执行${{ env.FOFA_DESC }}爬取"
+          # 创建ip目录
+          mkdir -p ip
+          # 爬取FOFA页面提取IP:PORT
+          all_ips=$(curl -sL --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+            --referer "https://fofa.info/" ${{ env.FOFA_URL }} | grep -oE '<a href="http://([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]+)"' | cut -d'/' -f3 | sort -u)
+          if [ -z "$all_ips" ]; then
+            echo "❌ 未爬取到任何IP，跳过后续处理"
+            exit 0
+          fi
+          echo "✅ 初步爬取到IP数量：$(echo "$all_ips" | wc -l) 个"
+          
+          # IP归属地+运营商解析（调用ip-api）
+          while IFS= read -r ip_port; do
+            ip=$(echo "$ip_port" | cut -d':' -f1)
+            # 调用ip-api获取省份/运营商
+            ip_info=$(curl -sL "http://ip-api.com/json/$ip?lang=zh-CN" --connect-timeout 5 --max-time 10)
+            province=$(echo "$ip_info" | grep -oE '"regionName":"[^"]+"' | cut -d':' -f2 | tr -d '"')
+            isp=$(echo "$ip_info" | grep -oE '"isp":"[^"]+"' | cut -d':' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
+            # 运营商匹配
+            if [[ $isp =~ telecom|ct|chinatelecom ]]; then
+              isp_cn="电信"
+            elif [[ $isp =~ unicom|cu|chinaunicom ]]; then
+              isp_cn="联通"
+            elif [[ $isp =~ mobile|cm|chinamobile ]]; then
+              isp_cn="移动"
+            else
+              echo "⚠️ 无法识别运营商，跳过 $ip_port"
+              continue
+            fi
+            # 省份空值处理
+            if [ -z "$province" ] || [ "$province" == "null" ]; then
+              province="未知"
+            fi
+            # 写入对应省份运营商文件
+            target_file="ip/${province}${isp_cn}.txt"
+            if ! grep -xFq "$ip_port" "$target_file" 2>/dev/null; then
+              echo "$ip_port" >> "$target_file"
+              sort -u "$target_file" -o "$target_file"
+            fi
+          done <<< "$all_ips"
+          
+          echo "🎉 ${{ env.FOFA_DESC }}爬取完成，已写入ip目录对应文件"
+
+      # ==============================================
+      # 可扩展FOFA爬取模块 - 任务2
+      # 新增FOFA任务：复制上方FOFA step，修改此处env即可
+      # ==============================================
+      - name: FOFA爬取-任务2
+        if: github.event.schedule.id == 'fofa_task2' || github.event.inputs.run_fofa2 == 'true'
+        env:
+          # FOFA链接2（base64查询语句）
+          FOFA_URL: "https://fofa.info/result?qbase64=InVkcHh5IiAmJiBjb3VudHJ5PSJDTiIgJiYgcmVnaW9uPSJCZWlqaW5nIiAmJiBvcmc9IkNoaW5hIFVuaWNvbSBCZWlqaW5nIFByb3ZpbmNlIE5ldHdvcmsi"
+          FOFA_DESC: "FOFA链接2"
+        run: |
+          echo "📡 开始执行${{ env.FOFA_DESC }}爬取"
+          # 创建ip目录
+          mkdir -p ip
+          # 爬取FOFA页面提取IP:PORT
+          all_ips=$(curl -sL --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+            --referer "https://fofa.info/" ${{ env.FOFA_URL }} | grep -oE '<a href="http://([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]+)"' | cut -d'/' -f3 | sort -u)
+          if [ -z "$all_ips" ]; then
+            echo "❌ 未爬取到任何IP，跳过后续处理"
+            exit 0
+          fi
+          echo "✅ 初步爬取到IP数量：$(echo "$all_ips" | wc -l) 个"
+          
+          # IP归属地+运营商解析（调用ip-api）
+          while IFS= read -r ip_port; do
+            ip=$(echo "$ip_port" | cut -d':' -f1)
+            # 调用ip-api获取省份/运营商
+            ip_info=$(curl -sL "http://ip-api.com/json/$ip?lang=zh-CN" --connect-timeout 5 --max-time 10)
+            province=$(echo "$ip_info" | grep -oE '"regionName":"[^"]+"' | cut -d':' -f2 | tr -d '"')
+            isp=$(echo "$ip_info" | grep -oE '"isp":"[^"]+"' | cut -d':' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
+            # 运营商匹配
+            if [[ $isp =~ telecom|ct|chinatelecom ]]; then
+              isp_cn="电信"
+            elif [[ $isp =~ unicom|cu|chinaunicom ]]; then
+              isp_cn="联通"
+            elif [[ $isp =~ mobile|cm|chinamobile ]]; then
+              isp_cn="移动"
+            else
+              echo "⚠️ 无法识别运营商，跳过 $ip_port"
+              continue
+            fi
+            # 省份空值处理
+            if [ -z "$province" ] || [ "$province" == "null" ]; then
+              province="未知"
+            fi
+            # 写入对应省份运营商文件
+            target_file="ip/${province}${isp_cn}.txt"
+            if ! grep -xFq "$ip_port" "$target_file" 2>/dev/null; then
+              echo "$ip_port" >> "$target_file"
+              sort -u "$target_file" -o "$target_file"
+            fi
+          done <<< "$all_ips"
+          
+          echo "🎉 ${{ env.FOFA_DESC }}爬取完成，已写入ip目录对应文件"
+
+      # ==============================================
+      # 原IP同步任务1：从kakaxi下载并解析IPTV
+      # ==============================================
+      - name: 原IP同步-1. 从kakaxi下载并解析 IPTV
+        if: github.event.schedule.id == 'ip_sync' || github.event.inputs.run_ip_sync == 'true'
         run: |
           declare -A initial_counts
           for file in ./ip/*.txt; do
@@ -73,10 +207,12 @@ jobs:
             fi
           done
           echo "====================================="
+
       # ==============================================
-      # 2. 原 IP_TV-yjc 任务（第二个执行）
+      # 原IP同步任务2：从 TV-yjc 同步IP（不覆盖）
       # ==============================================
-      - name: 2. 从 TV-yjc 同步IP（不覆盖）
+      - name: 原IP同步-2. 从 TV-yjc 同步IP（不覆盖）
+        if: github.event.schedule.id == 'ip_sync' || github.event.inputs.run_ip_sync == 'true'
         run: |
           # 先把当前状态暂存，用于后续对比
           git add ip/
@@ -122,10 +258,12 @@ jobs:
           echo "====================================="
           # 清理补丁文件
           rm -f before.patch after.patch
+
       # ==============================================
-      # 3. 原 IP_iptvz 任务（第三个执行）
+      # 原IP同步任务3：从 iptvz 同步电信/联通IP
       # ==============================================
-      - name: 3. 从 iptvz 同步电信/联通IP
+      - name: 原IP同步-3. 从 iptvz 同步电信/联通IP
+        if: github.event.schedule.id == 'ip_sync' || github.event.inputs.run_ip_sync == 'true'
         run: |
           declare -A initial_counts
           for file in ./ip/*.txt; do
@@ -175,10 +313,11 @@ jobs:
             echo "  - $file: +${file_added[$file]} 条"
           done
           echo "====================================="
+
       # ==============================================
-      # 统一提交推送（合并三个任务的所有更新）
+      # 统一提交推送（FOFA+IP同步的所有更新）
       # ==============================================
-      - name: 提交并推送更新
+      - name: 提交并推送所有IP更新
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
@@ -186,14 +325,14 @@ jobs:
           
           git add ip/
           if git diff --staged --quiet; then
-            echo "✅ 无新IP更新，无需提交"
+            echo "✅ 无新IP/FOFA更新，无需提交"
           else
             if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-              commit_msg="手动触发IP更新（合并kakaxi/TV-yjc/iptvz）"
+              commit_msg="手动触发-FOFA爬取+kakaxi/TV-yjc/iptvz IP更新"
             else
-              commit_msg="定时更新IP（合并kakaxi/TV-yjc/iptvz）"
+              commit_msg="定时触发-FOFA爬取+kakaxi/TV-yjc/iptvz IP更新"
             fi
             git commit -m "$commit_msg"
             git push
-            echo "✅ 已合并提交所有IP更新到仓库"
+            echo "✅ 已合并提交FOFA+所有IP更新到仓库"
           fi
