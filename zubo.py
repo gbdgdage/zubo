@@ -6,19 +6,7 @@ import time
 import concurrent.futures
 import subprocess
 from datetime import datetime, timezone, timedelta
-# ===============================
-# 配置区：2条FOFA链接按顺序存放
-FOFA_URLS = [
-    # 奇数轮(1/3/5/7/9)爬取：第一条
-    ("https://fofa.info/result?qbase64=InVkcHh5IiAmJiBjb3VudHJ5PSJDTiIgJiYgcmVnaW9uPSJTaWNodWFuIiAmJiBvcmc9IkNoaW5hbmV0Igo=", "ip.txt"),
-    # 偶数轮(2/4/6/8/10)爬取：第二条
-    ("https://fofa.info/result?qbase64=InVkcHh5IiAmJiBjb3VudHJ5PSJDTiIgJiYgcmVnaW9uPSJCZWlqaW5nIiAmJiBvcmc9IkNoaW5hIFVuaWNvbSBCZWlqaW5nIFByb3ZpbmNlIE5ldHdvcmsi", "ip.txt")
-]
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Referer": "https://fofa.info/",
-    "Accept-Language": "zh-CN,zh;q=0.9"
-}
+
 COUNTER_FILE = "计数.txt"
 IP_DIR = "ip"
 RTP_DIR = "rtp"
@@ -158,6 +146,7 @@ def get_run_count():
         except Exception:
             return 0
     return 0
+
 def save_run_count(count):
     try:
         with open(COUNTER_FILE, "w", encoding="utf-8") as f:
@@ -170,108 +159,15 @@ run_count = get_run_count() + 1
 save_run_count(run_count)
 print(f"📌 本次程序运行次数：{run_count}")
 # ===============================
-# 运营商判断（原逻辑无改动）
-def get_isp_from_api(data):
-    isp_raw = (data.get("isp") or "").lower()
-    if "telecom" in isp_raw or "ct" in isp_raw or "chinatelecom" in isp_raw:
-        return "电信"
-    elif "unicom" in isp_raw or "cu" in isp_raw or "chinaunicom" in isp_raw:
-        return "联通"
-    elif "mobile" in isp_raw or "cm" in isp_raw or "chinamobile" in isp_raw:
-        return "移动"
-    return "未知"
-def get_isp_by_regex(ip):
-    if re.match(r"^(1[0-9]{2}|2[0-3]{2}|42|43|58|59|60|61|110|111|112|113|114|115|116|117|118|119|120|121|122|123|124|125|126|127|175|180|182|183|184|185|186|187|188|189|223)\.", ip):
-        return "电信"
-    elif re.match(r"^(42|43|58|59|60|61|110|111|112|113|114|115|116|117|118|119|120|121|122|123|124|125|126|127|175|180|182|183|184|185|186|187|188|189|223)\.", ip):
-        return "联通"
-    elif re.match(r"^(223|36|37|38|39|100|101|102|103|104|105|106|107|108|109|134|135|136|137|138|139|150|151|152|157|158|159|170|178|182|183|184|187|188|189)\.", ip):
-        return "移动"
-    return "未知"
-# ===============================
-# 第一阶段：爬取IP并按省份运营商分类【核心修改：按奇偶轮选择FOFA链接】
+# 新第一阶段：生成zubo.txt组合链接（原第二阶段）
 def first_stage():
-    os.makedirs(IP_DIR, exist_ok=True)
-    all_ips = set()
-    # 核心逻辑：奇数轮选第一条FOFA，偶数轮(含10轮)选第二条FOFA
-    if run_count % 2 == 1:
-        url_index = 0
-        link_desc = "第一条（奇数轮专属）"
-    else:
-        url_index = 1
-        link_desc = "第二条（偶数轮专属）"
-    target_url, filename = FOFA_URLS[url_index]
-    print(f"📡 本轮({run_count})爬取{link_desc}FOFA链接：{target_url} ...")
-    # 爬取逻辑（原逻辑无改动）
-    try:
-        r = requests.get(target_url, headers=HEADERS, timeout=15)
-        urls_all = re.findall(r'<a href="http://(.*?)"', r.text)
-        all_ips.update(u.strip() for u in urls_all if u.strip())
-    except Exception as e:
-        print(f"❌ 爬取失败：{e}")
-    time.sleep(3)
-    # IP解析与分类（原逻辑无改动）
-    province_isp_dict = {}
-    for ip_port in all_ips:
-        try:
-            host = ip_port.split(":")[0]
-            is_ip = re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host)
-            if not is_ip:
-                try:
-                    resolved_ip = socket.gethostbyname(host)
-                    print(f"🌐 域名解析成功: {host} → {resolved_ip}")
-                    ip = resolved_ip
-                except Exception:
-                    print(f"❌ 域名解析失败，跳过：{ip_port}")
-                    continue
-            else:
-                ip = host
-            res = requests.get(f"http://ip-api.com/json/{ip}?lang=zh-CN", timeout=10)
-            data = res.json()
-            province = data.get("regionName", "未知")
-            isp = get_isp_from_api(data)
-            if isp == "未知":
-                isp = get_isp_by_regex(ip)
-            if isp == "未知":
-                print(f"⚠️ 无法判断运营商，跳过：{ip_port}")
-                continue
-            fname = f"{province}{isp}.txt"
-            province_isp_dict.setdefault(fname, set()).add(ip_port)
-        except Exception as e:
-            print(f"⚠️ 解析 {ip_port} 出错：{e}")
-            continue
-    # IP去重写入（原逻辑无改动）
-    for filename, new_ip_set in province_isp_dict.items():
-        path = os.path.join(IP_DIR, filename)
-        total_ip_set = new_ip_set.copy()
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    existing_ips = [line.strip() for line in f if line.strip()]
-                    total_ip_set.update(existing_ips)
-                print(f"📂 读取{path}已有IP：{len(existing_ips)}个，新爬取：{len(new_ip_set)}个")
-            except Exception as e:
-                print(f"⚠️ 读取{path}失败，直接写入新IP：{e}")
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                for ip_port in sorted(total_ip_set):
-                    f.write(ip_port + "\n")
-            new_add = len(total_ip_set) - (len(existing_ips) if os.path.exists(path) else 0)
-            print(f"{path} 已去重写入，总数量：{len(total_ip_set)}个，本次新增：{new_add}个")
-        except Exception as e:
-            print(f"❌ 写入 {path} 失败：{e}")
-    print(f"✅ 第一阶段IP爬取完成，当前轮次：{run_count}")
-    return run_count
-# ===============================
-# 第二阶段：生成zubo.txt组合链接（原逻辑无改动）
-def second_stage():
-    print("🔔 第二阶段触发：生成 zubo.txt")
+    print("🔔 第一阶段触发：生成 zubo.txt")
     if not os.path.exists(IP_DIR):
-        print("⚠️ ip 目录不存在，跳过第二阶段")
+        print("⚠️ ip 目录不存在，跳过第一阶段")
         return
     combined_lines = []
     if not os.path.exists(RTP_DIR):
-        print("⚠️ rtp 目录不存在，无法进行第二阶段组合，跳过")
+        print("⚠️ rtp 目录不存在，无法进行第一阶段组合，跳过")
         return
     for ip_file in os.listdir(IP_DIR):
         if not ip_file.endswith(".txt"):
@@ -310,15 +206,15 @@ def second_stage():
         with open(ZUBO_FILE, "w", encoding="utf-8") as f:
             for line in unique.values():
                 f.write(line + "\n")
-        print(f"🎯 第二阶段完成，写入 {len(unique)} 条记录")
+        print(f"🎯 第一阶段完成，写入 {len(unique)} 条记录")
     except Exception as e:
         print(f"❌ 写文件失败：{e}")
 # ===============================
-# 第三阶段：多线程检测频道并生成IPTV.txt（原逻辑无改动）
-def third_stage():
-    print("🧩 第三阶段：多线程检测代表频道生成 IPTV.txt，准备可播放IP数据")
+# 新第二阶段：多线程检测频道并生成IPTV.txt（原第三阶段）
+def second_stage():
+    print("🧩 第二阶段：多线程检测代表频道生成 IPTV.txt，准备可播放IP数据")
     if not os.path.exists(ZUBO_FILE):
-        print("⚠️ zubo.txt 不存在，跳过第三阶段")
+        print("⚠️ zubo.txt 不存在，跳过第二阶段")
         return None
     def check_stream(url, timeout=10):
         try:
@@ -432,12 +328,12 @@ def third_stage():
         print(f"❌ 写 IPTV.txt 失败：{e}")
     return operator_playable_ips
 # ===============================
-# 第四阶段：写回可用IP到ip目录（原逻辑无改动，仅10轮触发）
-def fourth_stage(operator_playable_ips):
+# 新第三阶段：写回可用IP到ip目录（原第四阶段）
+def third_stage(operator_playable_ips):
     if not operator_playable_ips:
-        print("⚠️ 无可用IP数据，跳过第四阶段")
+        print("⚠️ 无可用IP数据，跳过第三阶段")
         return
-    print("📤 第四阶段触发：写回可用IP到ip目录（覆盖模式）")
+    print("📤 第三阶段触发：写回可用IP到ip目录（覆盖模式）")
     for operator, ip_set in operator_playable_ips.items():
         target_file = os.path.join(IP_DIR, operator + ".txt")
         try:
@@ -447,7 +343,7 @@ def fourth_stage(operator_playable_ips):
             print(f"📥 写回 {target_file}，共 {len(ip_set)} 个可用地址")
         except Exception as e:
             print(f"❌ 写回 {target_file} 失败：{e}")
-    print("✅ 第四阶段完成：所有可用IP已覆盖写入ip目录")
+    print("✅ 第三阶段完成：所有可用IP已覆盖写入ip目录")
 # ===============================
 # 文件推送（原逻辑无改动）
 def push_all_files():
@@ -463,28 +359,22 @@ def push_all_files():
     os.system('git commit -m "自动更新：计数、IP文件、IPTV.txt" || echo "⚠️ 无需提交"')
     os.system("git push origin main || echo '⚠️ 推送失败'")
 # ===============================
-# 主执行逻辑【核心修改：按奇偶轮+10轮全阶段实现】
+# 主执行逻辑【核心修改：新一/二阶段必执行，三阶段5的倍数轮触发】
 if __name__ == "__main__":
     # 确保基础目录存在
     os.makedirs(IP_DIR, exist_ok=True)
     os.makedirs(RTP_DIR, exist_ok=True)
-    # 所有轮次必执行：第一阶段IP爬取
+    
+    # 新一阶段：生成zubo.txt 【每次运行必执行】
     first_stage()
-
-    # 奇数轮(1/3/5/7/9)：仅执行第一阶段，直接退出
-    if run_count % 2 == 1:
-        print(f"📌 本次为第{run_count}次【奇数轮】，仅完成IP爬取，跳过后续所有阶段")
-        exit()
-
-    # 偶数轮(2/4/6/8/10)：执行第二、三阶段
-    second_stage()
-    operator_playable_ips = third_stage()
-
-    # 第10轮（及10的倍数轮）：额外执行第四阶段（写回可用IP）
-    if run_count % 10 == 0:
-        fourth_stage(operator_playable_ips)
+    # 新二阶段：检测频道+生成IPTV.txt 【每次运行必执行】
+    operator_playable_ips = second_stage()
+    
+    # 新三阶段：写回可用IP 【仅运行次数为5的倍数时触发】
+    if run_count % 5 == 0:
+        third_stage(operator_playable_ips)
     else:
-        print(f"ℹ️ 当前轮次{run_count}，未达到10轮，跳过第四阶段")
-
-    # 所有偶数轮均执行：文件推送到GitHub
+        print(f"ℹ️ 当前轮次{run_count}，未达到5的倍数，跳过第三阶段")
+    
+    # 每次运行均执行：文件推送到GitHub
     push_all_files()
