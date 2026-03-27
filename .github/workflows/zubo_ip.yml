@@ -32,7 +32,7 @@ jobs:
         with:
           fetch-depth: 1
       # ==============================================
-      # 可扩展FOFA爬取模块 - 任务1
+      # 可扩展FOFA爬取模块 - 任务1（固定：四川电信）
       # ==============================================
       - name: FOFA爬取-任务1
         if: github.event.schedule.cron == '0 16 * * *' || github.event.inputs.run_fofa1 == 'true'
@@ -40,8 +40,10 @@ jobs:
           # FOFA链接1（base64查询语句）
           FOFA_URL: "https://fofa.info/result?qbase64=InVkcHh5IiAmJiBjb3VudHJ5PSJDTiIgJiYgcmVnaW9uPSJTaWNodWFuIiAmJiBvcmc9IkNoaW5hbmV0Igo="
           FOFA_DESC: "FOFA链接1"
+          FIXED_PROVINCE: "四川"  # 固定省份
+          FIXED_ISP: "电信"       # 固定运营商
         run: |
-          echo "📡 开始执行${{ env.FOFA_DESC }}爬取"
+          echo "📡 开始执行${{ env.FOFA_DESC }}爬取（固定归属：${{ env.FIXED_PROVINCE }}${{ env.FIXED_ISP }}）"
           # 创建ip目录
           mkdir -p ip
           # 爬取FOFA页面提取IP:PORT 并去行尾引号
@@ -60,32 +62,11 @@ jobs:
             [ -f "$file" ] && initial_counts["$file"]=$(wc -l < "$file") || initial_counts["$file"]=0
           done
           total_new=0
+          target_file="ip/${{ env.FIXED_PROVINCE }}${{ env.FIXED_ISP }}.txt"
+          touch "$target_file"
           
-          # IP归属地+运营商解析（调用ip-api）
+          # 直接写入固定归属文件，无需调用ip-api
           while IFS= read -r ip_port; do
-            ip=$(echo "$ip_port" | cut -d':' -f1)
-            # 调用ip-api获取省份/运营商
-            ip_info=$(curl -sL "http://ip-api.com/json/$ip?lang=zh-CN" --connect-timeout 5 --max-time 10)
-            province=$(echo "$ip_info" | grep -oE '"regionName":"[^"]+"' | cut -d':' -f2 | tr -d '"')
-            isp=$(echo "$ip_info" | grep -oE '"isp":"[^"]+"' | cut -d':' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
-            # 运营商匹配
-            if [[ $isp =~ telecom|ct|chinatelecom ]]; then
-              isp_cn="电信"
-            elif [[ $isp =~ unicom|cu|chinaunicom ]]; then
-              isp_cn="联通"
-            elif [[ $isp =~ mobile|cm|chinamobile ]]; then
-              isp_cn="移动"
-            else
-              echo "⚠️ 无法识别运营商，跳过 $ip_port"
-              continue
-            fi
-            # 省份空值处理
-            if [ -z "$province" ] || [ "$province" == "null" ]; then
-              province="未知"
-            fi
-            # 写入对应省份运营商文件（去重）
-            target_file="ip/${province}${isp_cn}.txt"
-            touch "$target_file"
             if ! grep -xFq "$ip_port" "$target_file" 2>/dev/null; then
               echo "$ip_port" >> "$target_file"
               sort -u "$target_file" -o "$target_file"
@@ -96,22 +77,22 @@ jobs:
           echo "====================================="
           echo "📊 ${{ env.FOFA_DESC }} IP 更新统计"
           echo "爬取IP总数: $crawl_count 条"
+          echo "固定写入文件: $(basename "$target_file")"
           echo "更新文件列表:"
-          for file in ./ip/*.txt; do
-            [ -f "$file" ] || continue
-            final_count=$(wc -l < "$file")
-            initial_count=${initial_counts["$file"]}
-            added=$((final_count - initial_count))
-            if [ $added -gt 0 ]; then
-              echo "  - $(basename "$file"): +$added 条"
-              total_new=$((total_new + added))
-            fi
-          done
+          final_count=$(wc -l < "$target_file")
+          initial_count=${initial_counts["$target_file"]}
+          added=$((final_count - initial_count))
+          if [ $added -gt 0 ]; then
+            echo "  - $(basename "$target_file"): +$added 条"
+            total_new=$added
+          else
+            echo "  - 无新增IP"
+          fi
           echo "新增IP总数: $total_new 条"
           echo "====================================="
-          echo "🎉 ${{ env.FOFA_DESC }}爬取完成，已写入ip目录对应文件"
+          echo "🎉 ${{ env.FOFA_DESC }}爬取完成，已写入${{ env.FIXED_PROVINCE }}${{ env.FIXED_ISP }}.txt"
       # ==============================================
-      # 可扩展FOFA爬取模块 - 任务2
+      # 可扩展FOFA爬取模块 - 任务2（固定：北京市联通）
       # ==============================================
       - name: FOFA爬取-任务2
         if: github.event.schedule.cron == '0 18 * * *' || github.event.inputs.run_fofa2 == 'true'
@@ -119,8 +100,10 @@ jobs:
           # FOFA链接2（base64查询语句）
           FOFA_URL: "https://fofa.info/result?qbase64=InVkcHh5IiAmJiBjb3VudHJ5PSJDTiIgJiYgcmVnaW9uPSJCZWlqaW5nIiAmJiBvcmc9IkNoaW5hIFVuaWNvbSBCZWlqaW5nIFByb3ZpbmNlIE5ldHdvcmsi"
           FOFA_DESC: "FOFA链接2"
+          FIXED_PROVINCE: "北京市"  # 固定省份
+          FIXED_ISP: "联通"         # 固定运营商
         run: |
-          echo "📡 开始执行${{ env.FOFA_DESC }}爬取"
+          echo "📡 开始执行${{ env.FOFA_DESC }}爬取（固定归属：${{ env.FIXED_PROVINCE }}${{ env.FIXED_ISP }}）"
           # 创建ip目录
           mkdir -p ip
           # 爬取FOFA页面提取IP:PORT 并去行尾引号
@@ -139,32 +122,11 @@ jobs:
             [ -f "$file" ] && initial_counts["$file"]=$(wc -l < "$file") || initial_counts["$file"]=0
           done
           total_new=0
+          target_file="ip/${{ env.FIXED_PROVINCE }}${{ env.FIXED_ISP }}.txt"
+          touch "$target_file"
           
-          # IP归属地+运营商解析（调用ip-api）
+          # 直接写入固定归属文件，无需调用ip-api
           while IFS= read -r ip_port; do
-            ip=$(echo "$ip_port" | cut -d':' -f1)
-            # 调用ip-api获取省份/运营商
-            ip_info=$(curl -sL "http://ip-api.com/json/$ip?lang=zh-CN" --connect-timeout 5 --max-time 10)
-            province=$(echo "$ip_info" | grep -oE '"regionName":"[^"]+"' | cut -d':' -f2 | tr -d '"')
-            isp=$(echo "$ip_info" | grep -oE '"isp":"[^"]+"' | cut -d':' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
-            # 运营商匹配
-            if [[ $isp =~ telecom|ct|chinatelecom ]]; then
-              isp_cn="电信"
-            elif [[ $isp =~ unicom|cu|chinaunicom ]]; then
-              isp_cn="联通"
-            elif [[ $isp =~ mobile|cm|chinamobile ]]; then
-              isp_cn="移动"
-            else
-              echo "⚠️ 无法识别运营商，跳过 $ip_port"
-              continue
-            fi
-            # 省份空值处理
-            if [ -z "$province" ] || [ "$province" == "null" ]; then
-              province="未知"
-            fi
-            # 写入对应省份运营商文件（去重）
-            target_file="ip/${province}${isp_cn}.txt"
-            touch "$target_file"
             if ! grep -xFq "$ip_port" "$target_file" 2>/dev/null; then
               echo "$ip_port" >> "$target_file"
               sort -u "$target_file" -o "$target_file"
@@ -175,20 +137,20 @@ jobs:
           echo "====================================="
           echo "📊 ${{ env.FOFA_DESC }} IP 更新统计"
           echo "爬取IP总数: $crawl_count 条"
+          echo "固定写入文件: $(basename "$target_file")"
           echo "更新文件列表:"
-          for file in ./ip/*.txt; do
-            [ -f "$file" ] || continue
-            final_count=$(wc -l < "$file")
-            initial_count=${initial_counts["$file"]}
-            added=$((final_count - initial_count))
-            if [ $added -gt 0 ]; then
-              echo "  - $(basename "$file"): +$added 条"
-              total_new=$((total_new + added))
-            fi
-          done
+          final_count=$(wc -l < "$target_file")
+          initial_count=${initial_counts["$target_file"]}
+          added=$((final_count - initial_count))
+          if [ $added -gt 0 ]; then
+            echo "  - $(basename "$target_file"): +$added 条"
+            total_new=$added
+          else
+            echo "  - 无新增IP"
+          fi
           echo "新增IP总数: $total_new 条"
           echo "====================================="
-          echo "🎉 ${{ env.FOFA_DESC }}爬取完成，已写入ip目录对应文件"
+          echo "🎉 ${{ env.FOFA_DESC }}爬取完成，已写入${{ env.FIXED_PROVINCE }}${{ env.FIXED_ISP }}.txt"
       # ==============================================
       # 原IP同步任务1：从kakaxi下载并解析IPTV
       # ==============================================
