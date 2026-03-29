@@ -160,7 +160,7 @@ jobs:
             echo "  - $file: +${file_added[$file]} 条"
           done
           echo "====================================="
-      - name: 新增IP同步-4. 抓取gongdian并提取IP:端口（防限流+重试+备用接口版）
+      - name: 新增IP同步-4. 抓取gongdian并提取IP:端口（防限流+重试+备用接口+完整优化版）
         run: |
           # 初始化统计
           declare -A initial_counts
@@ -182,23 +182,40 @@ jobs:
           CITY_LIST="北京 上海 天津 重庆"
           new_ip_count=0
           # ==============================================
-          # 复刻Python代码：双阶段运营商识别（接口+IP段正则）
+          # 核心优化1：英文/拼音省份 → 中文省份 映射表
           # ==============================================
-          # 阶段1：接口识别isp的关键词匹配（转小写）
+          declare -A region_en2cn=(
+            ["Beijing"]="北京" ["Shanghai"]="上海" ["Tianjin"]="天津" ["Chongqing"]="重庆"
+            ["Hebei"]="河北" ["Shanxi"]="山西" ["Inner Mongolia"]="内蒙古" ["Liaoning"]="辽宁"
+            ["Jilin"]="吉林" ["Heilongjiang"]="黑龙江" ["Jiangsu"]="江苏" ["Zhejiang"]="浙江"
+            ["Anhui"]="安徽" ["Fujian"]="福建" ["Jiangxi"]="江西" ["Shandong"]="山东"
+            ["Henan"]="河南" ["Hubei"]="湖北" ["Hunan"]="湖南" ["Guangdong"]="广东"
+            ["Guangxi"]="广西" ["Hainan"]="海南" ["Sichuan"]="四川" ["Guizhou"]="贵州"
+            ["Yunnan"]="云南" ["Shaanxi"]="陕西" ["Gansu"]="甘肃" ["Qinghai"]="青海"
+            ["Ningxia"]="宁夏" ["Xinjiang"]="新疆" ["Xizang"]="西藏" ["Hong Kong"]="香港" ["Macau"]="澳门"
+            ["Shanxi"]="山西" ["Xianggang"]="香港" ["Aomen"]="澳门"
+          )
+          # ==============================================
+          # 核心优化2：修复netw误判 → 先匹配联通/移动，再匹配电信
+          # ==============================================
           match_isp_by_api() {
             local isp_raw=$1
             isp_raw=$(echo "$isp_raw" | tr 'A-Z' 'a-z')
-            if [[ $isp_raw =~ telecom|ct|chinatelecom|chinanet|netw ]]; then
-              echo "电信"
-            elif [[ $isp_raw =~ unicom|cu|chinaunicom|china169 ]]; then
+            # 优先匹配联通/移动，避免含Network的联通ISP被误判为电信
+            if [[ $isp_raw =~ unicom|cu|chinaunicom|china169 ]]; then
               echo "联通"
             elif [[ $isp_raw =~ mobile|cm|chinamobile ]]; then
               echo "移动"
+            # 最后匹配电信，保留所有电信标识
+            elif [[ $isp_raw =~ telecom|ct|chinatelecom|chinanet|netw ]]; then
+              echo "电信"
             else
               echo "未知"
             fi
           }
+          # ==============================================
           # 阶段2：IP段正则匹配兜底（完全复刻Python的正则规则）
+          # ==============================================
           match_isp_by_regex() {
             local ip=$1
             # 电信IP段
@@ -214,7 +231,9 @@ jobs:
               echo "未知"
             fi
           }
-          # 新增：IP查询函数（ip-api.com重试+api.ip.sb备用接口）
+          # ==============================================
+          # IP查询函数（ip-api.com重试+api.ip.sb备用接口）
+          # ==============================================
           get_ip_info() {
             local ip=$1
             # ip-api.com重试2次，每次间隔2秒
@@ -233,7 +252,7 @@ jobs:
             echo "⚠️  ip-api.com 重试失败，切换至备用接口 api.ip.sb 查询"
             local sb_info=$(curl -s "https://api.ip.sb/geoip/$ip" \
               -A "okhttp/5.1.0" --connect-timeout 5 --max-time 10 2>/dev/null || true)
-            if [ -n "$sb_info" ]; then
+            if [ -n "$sb_info" ] && echo "$sb_info" | grep -q '"region"'; then
               # 提取备用接口的省份和运营商，转成ip-api.com风格格式
               local region=$(echo "$sb_info" | grep -o '"region":"[^"]*' | cut -d'"' -f4 || true)
               local isp=$(echo "$sb_info" | grep -o '"isp":"[^"]*' | cut -d'"' -f4 || true)
@@ -247,7 +266,9 @@ jobs:
             echo ""
             return 1
           }
+          # ==============================================
           # 逐个处理host:port
+          # ==============================================
           while IFS= read -r host_port; do
             host="${host_port%%:*}"
             port="${host_port##*:}"
@@ -277,16 +298,26 @@ jobs:
               echo "❌ 所有接口查询失败，跳过"
               continue
             fi
-            # 4. 提取省份regionName（复刻Python data.get("regionName")）
+            # ==============================================
+            # 核心优化3：提取省份+英文转中文+去省留市（仅删省/自治区/特别行政区）
+            # ==============================================
             province=$(echo "$ip_info" | grep -o '"regionName":"[^"]*' | cut -d'"' -f4 || true)
+            # 第一步：英文/拼音省份自动转中文
+            if [[ -v "region_en2cn[$province]" ]]; then
+              province_cn="${region_en2cn[$province]}"
+              echo "ℹ️  英文省份转中文：$province → $province_cn"
+              province="$province_cn"
+            fi
+            # 第二步：清洗省份 - 仅去掉省/自治区/特别行政区，保留市字
+            province=$(echo "$province" | sed -e 's/省//g' -e 's/自治区//g' -e 's/特别行政区//g')
+            echo "ℹ️  清洗后最终省份：$province"
+            # 空值/未知判断
             if [ -z "$province" ] || [ "$province" = "null" ] || [ "$province" = "未知" ]; then
               province="未知"
               echo "⚠️  接口未返回省份，设为：未知"
-            else
-              echo "ℹ️  接口提取省份：$province"
+              continue
             fi
-            [ "$province" = "未知" ] && continue
-            # 5. 提取isp并双阶段识别（核心：复刻Python get_isp_from_api + get_isp_by_regex）
+            # 5. 提取isp并双阶段识别
             isp_raw=$(echo "$ip_info" | grep -o '"isp":"[^"]*' | cut -d'"' -f4 || true)
             isp=$(match_isp_by_api "$isp_raw")
             echo "ℹ️  阶段1-接口识别运营商：$isp（原始isp：$isp_raw）"
