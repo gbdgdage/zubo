@@ -160,7 +160,7 @@ jobs:
             echo "  - $file: +${file_added[$file]} 条"
           done
           echo "====================================="
-      - name: 新增IP同步-4. 抓取gongdian并提取IP:端口（防限流+重试+备用接口+完整优化版）
+      - name: 新增IP同步-4. 抓取gongdian并提取IP:端口（域名保留原地址+最终完美版）
         run: |
           # 初始化统计
           declare -A initial_counts
@@ -182,7 +182,7 @@ jobs:
           CITY_LIST="北京 上海 天津 重庆"
           new_ip_count=0
           # ==============================================
-          # 核心优化1：英文/拼音省份 → 中文省份 映射表
+          # 英文/拼音省份 → 中文省份 映射表
           # ==============================================
           declare -A region_en2cn=(
             ["Beijing"]="北京" ["Shanghai"]="上海" ["Tianjin"]="天津" ["Chongqing"]="重庆"
@@ -196,7 +196,7 @@ jobs:
             ["Shanxi"]="山西" ["Xianggang"]="香港" ["Aomen"]="澳门"
           )
           # ==============================================
-          # 核心优化2：修复netw误判 → 先匹配联通/移动，再匹配电信
+          # 运营商识别：先匹配联通/移动，再匹配电信（修复netw误判）
           # ==============================================
           match_isp_by_api() {
             local isp_raw=$1
@@ -267,39 +267,43 @@ jobs:
             return 1
           }
           # ==============================================
-          # 逐个处理host:port
+          # 逐个处理host:port（核心：域名保留原地址，仅纯IP解析）
           # ==============================================
           while IFS= read -r host_port; do
             host="${host_port%%:*}"
             port="${host_port##*:}"
             [ -z "$host" ] || [ -z "$port" ] && continue
             echo -e "\n🔧 开始处理：$host_port"
-            # 1. 域名解析/纯IP判断（复刻Python socket.gethostbyname）
+            # 核心区分：纯IP vs 域名
             if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              ip="$host"
-              echo "ℹ️  纯IP，无需解析：$ip"
+              # 纯IP：用原IP做归属地查询，写入原IP:port
+              query_ip="$host"
+              write_addr="$host_port"
+              echo "ℹ️  纯IP地址，直接使用：$query_ip"
             else
-              ip=$(dig +short "$host" 2>/dev/null | head -n 1 | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" || true)
-              if [ -z "$ip" ]; then
-                echo "❌ 域名解析失败，跳过"
+              # 域名：解析IP仅用于归属地查询，写入原域名:port（不解析）
+              query_ip=$(dig +short "$host" 2>/dev/null | head -n 1 | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" || true)
+              write_addr="$host_port"
+              if [ -z "$query_ip" ]; then
+                echo "❌ 域名解析IP失败（仅用于归属地），跳过"
                 continue
               fi
-              echo "🌐 域名解析成功：$host → $ip"
+              echo "🌐 域名解析IP（仅用于归属地查询）：$host → $query_ip"
+              echo "ℹ️  写入文件将保留原域名：$write_addr"
             fi
-            ip_port="${ip}:${port}"
-            # 2. 过滤内网/组播IP
-            if [[ "$ip" =~ ^(10\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|22[4-9]\.|23[0-9]\.) ]]; then
-              echo "❌ 内网/组播IP，跳过：$ip"
+            # 2. 过滤内网/组播IP（仅针对查询用的IP）
+            if [[ "$query_ip" =~ ^(10\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[0-1]\.|192\.168\.|22[4-9]\.|23[0-9]\.) ]]; then
+              echo "❌ 查询IP为内网/组播IP，跳过：$query_ip"
               continue
             fi
-            # 3. 调用封装的IP查询函数（含重试+备用接口）
-            ip_info=$(get_ip_info "$ip")
+            # 3. 调用封装的IP查询函数（用解析的IP查归属地）
+            ip_info=$(get_ip_info "$query_ip")
             if [ -z "$ip_info" ]; then
               echo "❌ 所有接口查询失败，跳过"
               continue
             fi
             # ==============================================
-            # 核心优化3：提取省份+英文转中文+去省留市（仅删省/自治区/特别行政区）
+            # 省份提取+英文转中文+去省留市
             # ==============================================
             province=$(echo "$ip_info" | grep -o '"regionName":"[^"]*' | cut -d'"' -f4 || true)
             # 第一步：英文/拼音省份自动转中文
@@ -322,7 +326,7 @@ jobs:
             isp=$(match_isp_by_api "$isp_raw")
             echo "ℹ️  阶段1-接口识别运营商：$isp（原始isp：$isp_raw）"
             if [ "$isp" = "未知" ]; then
-              isp=$(match_isp_by_regex "$ip")
+              isp=$(match_isp_by_regex "$query_ip")
               echo "ℹ️  阶段2-IP段正则兜底：$isp"
             fi
             [ "$isp" = "未知" ] && echo "❌ 双阶段识别运营商失败，跳过" && continue
@@ -333,15 +337,15 @@ jobs:
             else
               target_province="$province"
             fi
-            # 7. 写入IP:端口（去重，和原有文件格式一致）
+            # 7. 写入文件：域名保留原域名:port，纯IP保留原IP:port
             target_file="./ip/${target_province}${isp}.txt"
             touch "$target_file"
-            if ! grep -xFq "$ip_port" "$target_file"; then
-              echo "$ip_port" >> "$target_file"
+            if ! grep -xFq "$write_addr" "$target_file"; then
+              echo "$write_addr" >> "$target_file"
               new_ip_count=$((new_ip_count + 1))
-              echo "✅  新增成功：$ip_port → $(basename "$target_file")"
+              echo "✅  新增成功：$write_addr → $(basename "$target_file")"
             else
-              echo "ℹ️  已存在，跳过：$ip_port → $(basename "$target_file")"
+              echo "ℹ️  已存在，跳过：$write_addr → $(basename "$target_file")"
             fi
             # 延长休眠至1秒，彻底避免ip-api.com限流
             sleep 1
@@ -355,7 +359,7 @@ jobs:
           # 最终统计输出（和文件新增完全对齐）
           echo -e "\n====================================="
           echo "📊 gongdian(rtp) IP:端口 更新统计"
-          echo "新增有效公网IP:端口总数: $new_ip_count 条"
+          echo "新增有效地址总数: $new_ip_count 条（域名保留原地址，纯IP保留原IP）"
           echo "====================================="
           echo "更新文件列表（仅展示有新增的）:"
           for file in ./ip/*.txt; do
