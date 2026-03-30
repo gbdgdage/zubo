@@ -15,7 +15,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: FOFA爬取-任务2（北京市联通）
+      - name: FOFA爬取-任务2（北京联通）
         env:
           FOFA_URL: "https://fofa.info/result?qbase64=InVkcHh5IiAmJiBjb3VudHJ5PSJDTiIgJiYgcmVnaW9uPSJCZWlqaW5nIiAmJiBvcmc9IkNoaW5hIFVuaWNvbSBCZWlqaW5nIFByb3ZpbmNlIE5ldHdvcmsi"
           FOFA_DESC: "FOFA链接2"
@@ -71,11 +71,11 @@ jobs:
             echo "✅ 无FOFA2 IP更新，无需提交"
           else
             if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-              commit_msg="手动触发-北京市联通FOFA2 IP爬取更新"
+              commit_msg="手动触发-北京联通FOFA2 IP爬取更新"
             else
-              commit_msg="定时触发-北京市联通FOFA2 IP爬取更新"
+              commit_msg="定时触发-北京联通FOFA2 IP爬取更新"
             fi
             git commit -m "$commit_msg"
             git push
-            echo "✅ 已提交推送北京市联通FOFA2 IP更新"
+            echo "✅ 已提交推送北京联通FOFA2 IP更新"
           fi
