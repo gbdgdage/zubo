@@ -135,8 +135,6 @@ def scan_ip_port(ip, port, option, url_end, start_time):
 def process_config_file(config_file, start_time):
     filename = os.path.basename(config_file)
     province_name = os.path.splitext(filename)[0].replace("_config", "")
-    if province_name in ["北京", "上海"]:
-        province_name = f"{province_name}市"
     print(f"\n{'='*25}\n   处理: {province_name}\n{'='*25}")
     configs, original_lines = read_config(config_file)
     if not configs:
