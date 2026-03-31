@@ -1,7 +1,7 @@
 name: zubo_ip
 on:
   schedule:
-    - cron: '0 17 * * *'
+    - cron: '0 16 * * *'
   workflow_dispatch:
 jobs:
   ip-sync-all:
