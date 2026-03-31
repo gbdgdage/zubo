@@ -68,10 +68,11 @@ jobs:
           echo "====================================="
       - name: IP同步-2. 从 TV-yjc 同步IP
         run: |
-          git add ip/
-          git diff --staged > before.patch
           git clone --depth 1 https://github.com/adminouyang/TV-yjc.git temp-tvyjc
           mkdir -p ip
+          # 初始化统计字典和总数
+          declare -A file_added
+          total_added=0
           cd ip
           while read src_file; do
             filename=$(basename "$src_file")
@@ -79,35 +80,38 @@ jobs:
             clean_filename=$(echo "$filename" | sed -e 's/省//g' -e 's/市//g' -e 's/自治区//g' -e 's/特别行政区//g')
             dest="$clean_filename"
             echo "正在处理: $filename → 清洗后 $dest"
+            # 记录处理前目标文件行数
+            before=0
+            [ -f "$dest" ] && before=$(wc -l < "$dest")
+            # 合并去重IP
             if [ -f "$dest" ]; then
               grep -xFf "$dest" "$src_file" -v >> "$dest" || true
               awk '!seen[$0]++' "$dest" > "$dest.tmp" && mv "$dest.tmp" "$dest"
             else
               cp "$src_file" "$dest"
             fi
+            # 清理无效内容
             sed -i '/^[[:space:]]*#/d' "$dest"
             sed -i '/无可用IP/d' "$dest"
+            # 统计当前文件新增数
+            after=$(wc -l < "$dest")
+            added=$((after - before))
+            if [ $added -gt 0 ]; then
+              file_added["$dest"]=$added
+              total_added=$((total_added + added))
+            fi
           done < <(find ../temp-tvyjc/IP_Scan/result_ip -type f -name "*.txt")
+          # 清理临时文件
           rm -rf ../temp-tvyjc
           cd ..
           echo "====================================="
           echo "📊 TV-yjc IP 更新统计"
-          git add ip/
-          git diff --staged > after.patch
-          before_plus=$(grep -E '^\+' before.patch | grep -v '^\+\++' | sort)
-          after_plus=$(grep -E '^\+' after.patch | grep -v '^\+\++' | sort)
-          total_added=$(comm -13 <(echo "$before_plus") <(echo "$after_plus") | wc -l)
           echo "新增IP总数: $total_added 条"
           echo "更新文件列表:"
-          comm -13 <(echo "$before_plus") <(echo "$after_plus") | \
-            sed -E 's/^\+([^:]+):.*/\1/' | \
-            sort | uniq -c | while read count file; do
-              if [ "$count" -gt 0 ]; then
-                echo "  - $(basename "$file"): +$count 条"
-              fi
-            done
+          for file in "${!file_added[@]}"; do
+            echo "  - $(basename "$file"): +${file_added[$file]} 条"
+          done
           echo "====================================="
-          rm -f before.patch after.patch
       - name: IP同步-3. 从 iptvz 同步电信/联通IP
         run: |
           declare -A initial_counts
