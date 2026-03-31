@@ -1,4 +1,4 @@
-name: zubo_ip_fofabj
+name: zubo_ip_bj
 on:
   schedule:
     - cron: '0 18 * * *'
