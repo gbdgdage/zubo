@@ -8,6 +8,7 @@ import subprocess
 import json
 from datetime import datetime, timezone, timedelta
 
+# 基础配置
 COUNTER_FILE = "计数.txt"
 IP_DIR = "ip"
 RTP_DIR = "rtp"
@@ -17,9 +18,13 @@ FAILED_COUNT_FILE = "ip_failed_count.json"
 MAX_FAILED_TIMES = 3  # 连续3次失败删除IP
 CLEAN_ROUND = 3       # 每3轮执行一次IP池清理
 
+# 全局IP-省份/运营商映射
+ip_info = {}
+
 # ===============================
 # IP失败计数操作函数
 def load_failed_count():
+    """加载IP连续失败计数，文件不存在则返回空字典"""
     if os.path.exists(FAILED_COUNT_FILE):
         try:
             with open(FAILED_COUNT_FILE, "r", encoding="utf-8") as f:
@@ -29,6 +34,7 @@ def load_failed_count():
     return {}
 
 def save_failed_count(failed_count):
+    """保存IP连续失败计数到json文件"""
     try:
         with open(FAILED_COUNT_FILE, "w", encoding="utf-8") as f:
             json.dump(failed_count, f, ensure_ascii=False, indent=2)
@@ -182,7 +188,7 @@ def save_run_count(count):
 # 顶层更新计数
 run_count = get_run_count() + 1
 save_run_count(run_count)
-print(f"📌 本次程序运行次数：{run_count}（每{CLEAN_ROUND}轮执行一次IP池清理）")
+print(f"📌 本次程序运行次数：{run_count}（每{CLEAN_ROUND}轮执行一次IP池清理，连续{MAX_FAILED_TIMES}次失败删除IP）")
 
 # ===============================
 # 第一阶段：生成zubo.txt组合链接
@@ -237,13 +243,16 @@ def first_stage():
         print(f"❌ 写文件失败：{e}")
 
 # ===============================
-# 第二阶段：多线程检测频道并生成IPTV.txt
+# 第二阶段：多线程检测频道+更新失败计数+全局IP映射
 def second_stage():
+    global ip_info  # 绑定全局IP-省份/运营商映射
     print("🧩 第二阶段：多线程检测代表频道生成 IPTV.txt，准备可播放IP数据")
     if not os.path.exists(ZUBO_FILE):
         print("⚠️ zubo.txt 不存在，跳过第二阶段")
         return None
+    
     def check_stream(url, timeout=10):
+        """检测流是否可播放"""
         try:
             result = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_streams", "-i", url],
@@ -261,23 +270,24 @@ def second_stage():
         for alias in aliases:
             alias_map[alias] = main_name
 
-    # 读取IP-运营商映射
-    ip_info = {}
+    # 重新加载IP-省份/运营商映射到全局变量
+    ip_info.clear()
     all_ips = set()
     if os.path.exists(IP_DIR):
         for fname in os.listdir(IP_DIR):
             if not fname.endswith(".txt"):
                 continue
-            province_operator = fname.replace(".txt", "")
+            province_operator = fname.replace(".txt", "")  # 文件名=省份/运营商
             try:
                 with open(os.path.join(IP_DIR, fname), encoding="utf-8") as f:
                     for line in f:
                         ip_port = line.strip()
-                        if ip_port:
+                        if ip_port and ip_port not in ip_info:
                             ip_info[ip_port] = province_operator
                             all_ips.add(ip_port)
             except Exception as e:
                 print(f"⚠️ 读取 {fname} 失败：{e}")
+    print(f"📥 加载到全局IP映射：共 {len(ip_info)} 个IP，分属 {len(set(ip_info.values()))} 个省份/运营商")
 
     # 按IP分组频道
     groups = {}
@@ -303,6 +313,7 @@ def second_stage():
         playable = any(check_stream(u, timeout=10) for u in rep_channels)
         return ip_port, playable
 
+    # 多线程检测
     print(f"🚀 启动多线程检测（共 {len(groups)} 个 IP/域名）...")
     playable_ips = set()
     unplayable_ips = set()
@@ -321,16 +332,16 @@ def second_stage():
             else:
                 unplayable_ips.add(ip_port)
 
-    # 更新IP失败计数
+    # 核心：更新IP失败计数
     for ip in all_ips:
         if ip in playable_ips:
-            failed_count[ip] = 0
+            failed_count[ip] = 0  # 成功：重置为0
         elif ip in unplayable_ips:
-            failed_count[ip] = failed_count.get(ip, 0) + 1
+            failed_count[ip] = failed_count.get(ip, 0) + 1  # 失败：计数+1
     save_failed_count(failed_count)
     # 打印失败计数日志
-    for ip in unplayable_ips:
-        print(f"ℹ️ IP {ip} 本次检测失败，连续失败次数：{failed_count[ip]}")
+    for ip in unplayable_ips & all_ips:
+        print(f"ℹ️ IP {ip}（{ip_info[ip]}）本次检测失败，连续失败次数：{failed_count[ip]}")
     print(f"✅ 检测完成，本次可播放 IP/域名 共 {len(playable_ips)} 个，不可用 {len(unplayable_ips)} 个")
 
     # 域名判断函数
@@ -360,7 +371,7 @@ def second_stage():
             else:
                 channel_lines[c]["normal"].append(key)
 
-    # 合并线路（最多50条）
+    # 合并线路
     valid_lines = []
     for ch, heap_dict in channel_lines.items():
         domain_list = heap_dict["domain"]
@@ -397,47 +408,50 @@ def second_stage():
     except Exception as e:
         print(f"❌ 写 IPTV.txt 失败：{e}")
 
-    # 返回所有IP+运营商映射
+    # 返回省份/运营商-IP映射
     operator_all_ips = {}
     for ip, operator in ip_info.items():
         operator_all_ips.setdefault(operator, set()).add(ip)
     return operator_all_ips
 
 # ===============================
-# 第三阶段：写回可用IP到ip目录
+# 第三阶段：按省份/运营商精准写回IP
 def third_stage(operator_all_ips):
-    if not operator_all_ips:
-        print("⚠️ 无IP数据，跳过第三阶段")
+    global ip_info
+    if not operator_all_ips or not ip_info:
+        print("⚠️ 无IP数据/全局IP映射，跳过第三阶段")
         return
-    print(f"📤 第三阶段触发：按连续失败≥{MAX_FAILED_TIMES}次规则，筛选后写入ip目录（覆盖模式）")
+    print(f"📤 第三阶段触发：按连续失败≥{MAX_FAILED_TIMES}次规则，匹配省份/运营商写回ip目录（覆盖模式）")
+    
     # 加载最新失败计数
     failed_count = load_failed_count()
-    # 遍历每个运营商，筛选保留IP
-    for operator, ip_set in operator_all_ips.items():
-        reserved_ips = [
-            ip for ip in ip_set
-            if failed_count.get(ip, 0) < MAX_FAILED_TIMES
-        ]
-        deleted_ips = [ip for ip in ip_set if failed_count.get(ip, 0) >= MAX_FAILED_TIMES]
-        if deleted_ips:
-            print(f"🔴 运营商 {operator}：删除连续失败≥{MAX_FAILED_TIMES}次的IP {deleted_ips}")
-        # 写入保留的IP
-        target_file = os.path.join(IP_DIR, operator + ".txt")
+    # 按省份/运营商分组：筛选【连续失败<3次】的IP，保留原归属
+    province_reserved_ips = {}
+    for ip, operator in ip_info.items():
+        if failed_count.get(ip, 0) < MAX_FAILED_TIMES:
+            province_reserved_ips.setdefault(operator, []).append(ip)
+        else:
+            print(f"🔴 待删除 IP {ip}（{operator}）：连续失败{failed_count[ip]}次，达到删除阈值")
+    
+    # 遍历分组，按原文件名写回IP
+    for operator, ip_list in province_reserved_ips.items():
+        target_file = os.path.join(IP_DIR, f"{operator}.txt")
         try:
             with open(target_file, "w", encoding="utf-8") as wf:
-                for ip_p in sorted(reserved_ips):
+                for ip_p in sorted(ip_list):
                     wf.write(ip_p + "\n")
-            print(f"📥 写回 {target_file}，保留 {len(reserved_ips)} 个可用/待检测地址")
+            print(f"📥 写回 {target_file}，保留 {len(ip_list)} 个可用/待检测IP")
         except Exception as e:
             print(f"❌ 写回 {target_file} 失败：{e}")
-    # 清理失败计数文件中已删除的IP
+    
+    # 清理失败计数文件：移除已删除的IP
     current_failed = load_failed_count()
-    all_reserved_ips = set()
-    for ip_set in operator_all_ips.values():
-        all_reserved_ips.update(ip_set)
-    new_failed = {ip: cnt for ip, cnt in current_failed.items() if ip in all_reserved_ips}
+    reserved_ips = set()
+    for ip_list in province_reserved_ips.values():
+        reserved_ips.update(ip_list)
+    new_failed = {ip: cnt for ip, cnt in current_failed.items() if ip in reserved_ips}
     save_failed_count(new_failed)
-    print(f"✅ 第三阶段完成：仅删除连续失败≥{MAX_FAILED_TIMES}次的IP，其余保留")
+    print(f"✅ 第三阶段完成：清理失败计数文件，剩余 {len(new_failed)} 个IP的计数记录")
 
 # ===============================
 # 文件推送
@@ -464,10 +478,10 @@ if __name__ == "__main__":
     
     # 一阶段：生成zubo.txt 【每次运行必执行】
     first_stage()
-    # 二阶段：检测频道+生成IPTV.txt 【每次运行必执行】
+    # 二阶段：检测频道+更新计数+全局IP映射 【每次运行必执行】
     operator_all_ips = second_stage()
     
-    # 三阶段：写回可用IP 【仅运行次数为3的倍数时触发】
+    # 三阶段：按省份/运营商写回IP 【仅运行次数为3的倍数时触发】
     if run_count % CLEAN_ROUND == 0:
         third_stage(operator_all_ips)
     else:
