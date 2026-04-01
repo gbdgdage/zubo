@@ -15,10 +15,18 @@ jobs:
           fetch-depth: 1
       - name: 抓取gongdian并提取IP
         run: |
+          # 仅初始化现有文件的统计，不处理不存在的文件
           declare -A initial_counts
+          existing_files=()
           for file in ./ip/*.txt; do
-            [ -f "$file" ] && initial_counts["$file"]=$(wc -l < "$file") || initial_counts["$file"]=0
+            [ -f "$file" ] && {
+              initial_counts["$file"]=$(wc -l < "$file")
+              existing_files+=("$file")
+            }
           done
+          # 无现有文件直接跳过整个步骤
+          [ ${#existing_files[@]} -eq 0 ] && echo "⚠️ ip目录下无现有文件，跳过本步骤" && exit 0
+          
           mkdir -p ip
           TARGET_URL="https://gongdian.top/tv/guovin"
           curl -L -A "okhttp/5.1.0" "$TARGET_URL" -o gongdian_iptv.txt 2>/dev/null
@@ -130,7 +138,7 @@ jobs:
             echo "ℹ️  清洗后最终省份：$province"
             if [ -z "$province" ] || [ "$province" = "null" ] || [ "$province" = "未知" ]; then
               province="未知"
-              echo "⚠️  接口未返回省份，设为：未知"
+              echo "⚠️  接口未返回省份，设为：未知，跳过"
               continue
             fi
             isp_raw=$(echo "$ip_info" | grep -o '"isp":"[^"]*' | cut -d'"' -f4 || true)
@@ -141,10 +149,14 @@ jobs:
               echo "ℹ️  阶段2-IP段正则兜底：$isp"
             fi
             [ "$isp" = "未知" ] && echo "❌ 双阶段识别运营商失败，跳过" && continue
-            # 直接使用清洗后的纯省份名
+            # 核心修改：仅处理已存在的目标文件，移除touch新建逻辑
             target_province="$province"
             target_file="./ip/${target_province}${isp}.txt"
-            touch "$target_file"
+            [ -f "$target_file" ] || {
+              echo "❌ 目标文件不存在，跳过：$(basename "$target_file")"
+              continue
+            }
+            # 仅往现有文件追加去重IP
             if ! grep -xFq "$write_addr" "$target_file"; then
               echo "$write_addr" >> "$target_file"
               new_ip_count=$((new_ip_count + 1))
@@ -154,17 +166,18 @@ jobs:
             fi
             sleep 1
           done < gongdian.txt
-          for file in ./ip/*.txt; do
+          # 仅对现有文件去重排序
+          for file in "${existing_files[@]}"; do
             sort -u "$file" -o "$file" 2>/dev/null || true
           done
-          rm -f gongdian_iptv.txt
+          # 清理临时文件
+          rm -f gongdian_iptv.txt gongdian.txt
           echo -e "\n====================================="
           echo "📊 gongdian(rtp) IP:端口 更新统计"
           echo "新增有效地址总数: $new_ip_count 条（域名保留原地址，纯IP保留原IP）"
           echo "====================================="
           echo "更新文件列表（仅展示有新增的）:"
-          for file in ./ip/*.txt; do
-            [ -f "$file" ] || continue
+          for file in "${existing_files[@]}"; do
             final_count=$(wc -l < "$file" 2>/dev/null || 0)
             initial_count=${initial_counts["$file"]:-0}
             added=$((final_count - initial_count))
@@ -183,11 +196,7 @@ jobs:
           if git diff --staged --quiet; then
             echo "✅ 无gongdian IP更新，无需提交"
           else
-            if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-              commit_msg="手动触发-gongdian IP同步更新"
-            else
-              commit_msg="定时触发-gongdian IP同步更新"
-            fi
+            commit_msg=$( [ "${{ github.event_name }}" == "workflow_dispatch" ] && echo "手动触发-gongdian IP同步更新" || echo "定时触发-gongdian IP同步更新" )
             git commit -m "$commit_msg"
             git push
             echo "✅ 已提交推送所有IP同步更新"
