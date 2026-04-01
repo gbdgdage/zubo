@@ -10,7 +10,9 @@
 60.184.115.77:4023
 60.186.34.44:8686
 hs.imyjy.cn:7088
-www.liangcl.top:8686
-www.lvyjay.win:4022
 ipv4.hs.imyjy.cn:7088
 l3.negative.video:50000
+sunny2017.xyz:7788
+www.liangcl.top:8686
+www.lvyjay.win:4022
+www.negative.top:50000
