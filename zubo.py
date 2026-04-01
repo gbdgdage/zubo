@@ -454,7 +454,6 @@ def push_all_files():
         pass
     # 添加文件到暂存区
     os.system("git add ip/*.txt || true")
-    os.system("git add zubo.txt || true")
     os.system("git add IPTV.txt || true")
     os.system("git add 失效IP计数.json || true")
     # 提交并推送
