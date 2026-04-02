@@ -39,11 +39,11 @@ jobs:
             echo "  - $(basename "$file")"
           done
 
-          # 核心改造：采集源数组
+          # 采集源数组，支持单独配置请求头
           declare -a collect_sources=(
-            "gongdian|https://gongdian.top/tv/guovin"
-            "lgg-lg|https://github.com/lgg-lg/iptv-api/raw/refs/heads/master/output/ipv4/result.txt"
-            # 新增源示例："新源名称|新源URL"
+            "gongdian|https://gongdian.top/tv/guovin|okhttp/5.1.0"
+            "lgg-lg|https://github.com/lgg-lg/iptv-api/raw/refs/heads/master/output/ipv4/result.txt|Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            # 新增源示例："新源名称|新源URL|请求头UA"
           )
           # 统一存储所有源的有效地址，去重
           all_valid_addrs=$(mktemp)
@@ -51,14 +51,18 @@ jobs:
 
           # 遍历采集源，统一抓取rtp/udp地址
           for source in "${collect_sources[@]}"; do
-            IFS='|' read -r src_name src_url <<< "$source"
+            IFS='|' read -r src_name src_url src_ua <<< "$source"
             echo -e "\n====================================="
             echo "🔍 开始采集【$src_name】，地址：$src_url"
             echo "====================================="
-            # 抓取源数据
+            # 抓取源数据，增加错误捕获，访问失败自动跳过
             src_temp=$(mktemp)
-            curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              "$src_url" -o "$src_temp" 2>/dev/null || true
+            # 增强curl容错
+            if ! curl -L -A "$src_ua" -f --connect-timeout 10 --max-time 15 "$src_url" -o "$src_temp" 2>/dev/null; then
+              echo "❌ 【$src_name】访问失败/超时，自动跳过该源"
+              rm -f "$src_temp"
+              continue
+            fi
             # 源数据为空则跳过
             if [ ! -s "$src_temp" ]; then
               echo "⚠️  【$src_name】源内容为空，跳过"
