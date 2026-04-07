@@ -70,6 +70,7 @@ jobs:
           TEST_TS_NUM = 3       # 测试分片数
           COST_DEV_THRESH = 1.5 # 耗时波动参考值（仅统计，不判定）
           MIN_CHUNK_SIZE = 512  # 最小有效分片大小（字节）
+          MIN_VALID_TS = 2      # 最小有效TS分片数，低于此值判定为不可用
           # 多线程配置
           IP_THREAD_NUM = 15    # 外层IP并发测速线程数（推荐10-20）
           TS_THREAD_NUM = 3     # 内层TS分片并发下载线程数（贴合TEST_TS_NUM）
@@ -318,8 +319,9 @@ jobs:
                           if cost is not None:
                               ts_costs.append(cost)
                   
-                  if len(ts_costs) < 1:
-                      return False, [], 0.0, 0.0, []
+                  # 判定有效TS分片数≥MIN_VALID_TS才可用
+                  if len(ts_costs) < MIN_VALID_TS:
+                      return False, [], 0.0, 0.0, ts_costs
                   
                   avg_cost = round(sum(ts_costs) / len(ts_costs), 2)
                   cost_dev = round(calculate_standard_deviation(ts_costs), 2)
@@ -328,11 +330,11 @@ jobs:
                   return False, [], 0.0, 0.0, []
           
           def merged_stream_test(channel_url):
-              """流测试 - 仅统计耗时/波动/质量分（无修改）"""
+              """流测试 - 仅统计耗时/波动/质量分"""
               try:
                   has_stream, urls, avg_cost, cost_dev, ts_costs = smart_ts_detection(channel_url)
                   if not has_stream:
-                      return False, 0.0, False, 0, "流不可用", 0.0, []
+                      return False, 0.0, False, 0, "流不可用", 0.0, ts_costs
                   if avg_cost <= 3 and cost_dev <= 0.8:
                       quality = 95
                       stable = True
@@ -355,7 +357,7 @@ jobs:
                   return False, 0.0, False, 0, f"检测失败: {str(e)[:20]}", 0.0, []
           
           def batch_stream_test(ip_port, channels):
-              """批量测试频道 - 仅测试1个首个CCTV频道（无修改）"""
+              """批量测试频道 - 仅测试1个首个CCTV频道"""
               best_cost = None
               best_stable = False
               best_quality = 0
