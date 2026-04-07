@@ -5,14 +5,14 @@ import requests
 from urllib3.exceptions import InsecureRequestWarning
 # 禁用不安全请求警告
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-# ====================== 配置区（后续仅改这里即可，输出自动同步） ======================
+# ====================== 配置区======================
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 IP_DIR = "Hotel/ip"
 if not os.path.exists(IP_DIR):
     os.makedirs(IP_DIR)
-# 仅保留【央视频道+卫视频道+数字频道】（后续增删/调整顺序，输出自动同步）
+
 CHANNEL_CATEGORIES = {
     "央视频道": [
         "CCTV1", "CCTV2", "CCTV3", "CCTV4", "CCTV5", "CCTV5+", "CCTV6", "CCTV7",
@@ -31,7 +31,7 @@ CHANNEL_CATEGORIES = {
 }
 SPECIAL_SYMBOLS = ["HD", "LT", "XF", "-", "_", " ", ".", "·", "高清", "标清", "超清", "H265", "4K", "FHD", "HDTV", "测试"]
 RESULTS_PER_CHANNEL = 50  # 单频道保留的最大地址数
-# 精准频道映射（后续仅改这里即可，匹配逻辑自动同步）
+
 CHANNEL_MAPPING = {
     "CCTV1": ["CCTV1", "CCTV-1", "CCTV1综合", "CCTV1高清", "CCTV1HD", "cctv1", "中央1台", "CCTV01"],
     "CCTV2": ["CCTV2", "CCTV-2", "CCTV2财经", "CCTV2高清", "CCTV2HD", "cctv2", "中央2台", "CCTV02"],
@@ -102,13 +102,12 @@ CHANNEL_MAPPING = {
     "精品剧场": ["精品剧场", "IPTV精品剧场"],
 }
 
-# ====================== 精简工具函数 ======================
+# ====================== 工具函数 ======================
 def remove_special_symbols(text):
     for symbol in SPECIAL_SYMBOLS:
         text = text.replace(symbol, "")
     return re.sub(r'\s+', '', text).strip().lower()
 
-# ====================== 核心优化：参考1.txt 精简频道统一+分类逻辑 ======================
 def process_channels(all_channels):
     # 初始化分类字典，自动适配CHANNEL_CATEGORIES
     itv_dict = {cat: [] for cat in CHANNEL_CATEGORIES}
@@ -146,7 +145,7 @@ def process_channels(all_channels):
         itv_dict[cat] = deduplicate(itv_dict[cat])
     return itv_dict
 
-# ====================== IP访问与频道提取（原内容完全不变） ======================
+# ====================== IP访问与频道提取======================
 def check_single_ip(ip_port, url_end):
     try:
         url = f"http://{ip_port}{url_end}"
@@ -192,7 +191,7 @@ def extract_channels(url):
         print(f"解析频道错误 {url}: {str(e)[:30]}")
         return []
 
-# ====================== 主流程（核心改动态输出，其余不变） ======================
+# ====================== 主流程======================
 def hotel_iptv():
     try:
         ip_file = os.path.join(IP_DIR, "hotel_ip.txt")
@@ -245,7 +244,7 @@ def hotel_iptv():
         os.makedirs(output_dir, exist_ok=True)
         final_output = os.path.join(output_dir, "hotel.txt")
         
-        # 核心修改：参考1.txt动态遍历CHANNEL_CATEGORIES输出，自动适配配置修改
+        # 动态遍历CHANNEL_CATEGORIES输出，自动适配配置修改
         with open(final_output, "w", encoding='utf-8') as f_out:
             f_out.write(f"{current_time}更新\n\n")
             for cat in CHANNEL_CATEGORIES:
@@ -258,23 +257,16 @@ def hotel_iptv():
                         f_out.write(f"{item[0]},{item[1]}\n")
                 f_out.write("\n")  # 分类间空行分隔
         
-        # 统计打印（动态统计，适配配置修改）
+        # 统计打印
         print(f"\n🎉 处理完成！最终文件已保存到: {final_output}")
     except Exception as e:
         print(f"❌ 整体处理失败: {str(e)}")
 
 def main():
-    # 主函数（原内容完全不变）
-    import pytz
-    beijing_tz = pytz.timezone("Asia/Shanghai")
-    start_time = datetime.datetime.now(beijing_tz)
-    print(f"脚本开始运行时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')} (北京时间)")
+    # 主函数
     hotel_iptv()
-    end_time = datetime.datetime.now(beijing_tz)
-    print(f"\n脚本结束运行时间: {end_time.strftime('%Y-%m-%d %H:%M:%S')} (北京时间)")
-    run_time = end_time - start_time
-    print(f"总运行时间: {run_time.seconds // 60}分{run_time.seconds % 60}秒")
-    print("📌 动态适配配置 | 输出hotel.txt | 无测速+无网段扫描 | 多IP共存 | 单频道地址数限制")
+    
+    print("📌 输出hotel.txt")
 
 if __name__ == "__main__":
     main()
