@@ -87,7 +87,7 @@ jobs:
                       return ip_port_set
                   ip_port_matches = re.findall(r'<a href="http://([\d\.]+:\d+)"', resp.text)
                   if not ip_port_matches:
-                      print("【FOFA爬取】未匹配到任何IP:端口")
+                      print(f"【FOFA爬取】未匹配到任何IP:端口")
                       return ip_port_set
                   for ip_port in ip_port_matches:
                       ip = ip_port.split(':')[0]
@@ -265,7 +265,9 @@ jobs:
                   
                   m3u8_resp = session.get(channel_url, timeout=5, verify=False)
                   if m3u8_resp.status_code != 200:
-                      try:
+                      # 兜底：直接TS流检测，MIN_VALID_TS校验
+                      ts_costs = []
+                      for i in range(TEST_TS_NUM):
                           start = time.time()
                           stream_resp = session.get(channel_url, timeout=DETECT_TIMEOUT, stream=True, verify=False)
                           if stream_resp.status_code == 200:
@@ -275,13 +277,15 @@ jobs:
                                       bytes_downloaded += len(chunk)
                                       if time.time() - start >= DETECT_TIMEOUT:
                                           break
-                              if bytes_downloaded < MIN_CHUNK_SIZE:
-                                  return False, [], 0.0, 0.0, []
-                              cost = round(time.time() - start, 2)
-                              return True, [channel_url], cost, 0.0, [cost]
-                      except:
-                          pass
-                      return False, [], 0.0, 0.0, []
+                              if bytes_downloaded >= MIN_CHUNK_SIZE:
+                                  cost = round(time.time() - start, 2)
+                                  ts_costs.append(cost)
+                      # 核心校验：兜底分支也必须满足MIN_VALID_TS要求
+                      if len(ts_costs) < MIN_VALID_TS:
+                          return False, [], 0.0, 0.0, ts_costs
+                      avg_cost = round(sum(ts_costs) / len(ts_costs), 2)
+                      cost_dev = round(calculate_standard_deviation(ts_costs), 2)
+                      return True, [channel_url]*len(ts_costs), avg_cost, cost_dev, ts_costs
                   
                   m3u8_content = m3u8_resp.text
                   base_url = channel_url.rsplit('/', 1)[0] + '/' if '/' in channel_url else channel_url + '/'
@@ -306,20 +310,18 @@ jobs:
                   
                   ts_urls = extract_all_ts(m3u8_content, base_url)
                   if not ts_urls:
-                      return True, [channel_url], 1.0, 0.0, [1.0]
+                      return False, [], 0.0, 0.0, []
                   
                   ts_costs = []
                   # 多线程测试TS分片
                   with ThreadPoolExecutor(max_workers=TS_THREAD_NUM) as ts_executor:
-                      # 提交所有分片任务
                       ts_futures = {ts_executor.submit(test_single_ts, ts_url, session): ts_url for ts_url in ts_urls[:TEST_TS_NUM]}
-                      # 获取结果
                       for future in as_completed(ts_futures):
                           cost = future.result()
                           if cost is not None:
                               ts_costs.append(cost)
                   
-                  # 判定有效TS分片数≥MIN_VALID_TS才可用
+                  # 核心校验：m3u8分支校验
                   if len(ts_costs) < MIN_VALID_TS:
                       return False, [], 0.0, 0.0, ts_costs
                   
