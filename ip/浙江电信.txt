@@ -2,7 +2,6 @@
 123.157.31.182:7912
 125.108.127.57:7778
 60.184.112.120:4023
-60.186.34.44:8686
 hs.hejd.net:7088
 hs.imyjy.cn:7088
 ipv4.hs.imyjy.cn:7088
@@ -11,4 +10,3 @@ www.liangcl.top:8686
 www.lvyjay.win:4022
 www.negative.top:50000
 www.slq888.cn:9999
-www.tangtuanpp.fun:4000
