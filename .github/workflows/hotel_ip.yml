@@ -29,13 +29,12 @@ jobs:
           import requests
           import re
           import os
-          import random
+          import math
           import time
           import json
           import socket
           import threading
-          import math
-          from urllib.parse import urlparse, urljoin
+          from urllib.parse import urlparse
           from concurrent.futures import ThreadPoolExecutor, as_completed
           
           # ===================== 全局配置区 =====================
@@ -56,8 +55,8 @@ jobs:
               "Accept-Language": "zh-CN,zh;q=0.9"
           }
           
-          # 直播源/IP检测专属请求头 - 独立配置，与FOFA无关
-          SOURCE_HEADERS = {
+          # 全局请求头（统一检测/解析/测速全流程）
+          HEADERS = {
               'User-Agent': 'okhttp/5.1.0',
               'Accept': '*/*',
               'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -72,7 +71,8 @@ jobs:
           MIN_CHUNK_SIZE = 512  # 最小有效分片大小（字节）
           MIN_VALID_TS = 2      # 最小有效TS分片数，低于此值判定为不可用
           # 多线程配置
-          IP_THREAD_NUM = 15    # 外层IP并发测速线程数（推荐10-20）
+          CHECK_THREAD_NUM = 10 # IP有效性检测并发数（轻量任务：TCP+接口检测）
+          IP_THREAD_NUM = 15    # IP测速解析并发数（重量级任务：频道解析+TS下载测速）
           TS_THREAD_NUM = 3     # 内层TS分片并发下载线程数（贴合TEST_TS_NUM）
           # ======================================================
           
@@ -98,132 +98,75 @@ jobs:
                   print(f"【FOFA爬取】异常: {str(e)[:50]}")
               return ip_port_set
           
-          def check_tcp_connection(ip, port, timeout=3):
-              """测试TCP连接是否可用"""
-              try:
-                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                  sock.settimeout(timeout)
-                  result = sock.connect_ex((ip, int(port)))
-                  sock.close()
-                  return result == 0
-              except:
-                  return False
+          # IP检测 + 多核心接口遍历
+          def check_single_ip(ip_port):
+              url_ends = ["/iptv/live/1000.json?key=txiptv", "/ZHGXTV/Public/json/live_interface.txt"]
+              for end in url_ends:
+                  try:
+                      url = f"http://{ip_port}{end}"
+                      resp = requests.get(url, timeout=3, headers=HEADERS, verify=False)
+                      resp.raise_for_status()
+                      if "tsfile" in resp.text or "hls" in resp.text or "m3u8" in resp.text:
+                          print(f"  {ip_port}: 检测通过 {url}")
+                          return url
+                  except:
+                      continue
+              return None
           
+          # 轻量IP有效性检测
           def check_ip_availability(ip_port, timeout=5):
-              """检测IP:端口是否可用"""
               try:
                   ip, port = ip_port.split(':')
-                  if not check_tcp_connection(ip, port, timeout=2):
+                  # 轻量TCP连接基础校验
+                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                  sock.settimeout(2)
+                  if sock.connect_ex((ip, int(port))) != 0:
                       print(f"  {ip_port}: TCP连接失败")
                       return False, None
-                  print(f"  {ip_port}: TCP连接成功")
-                  test_urls = [
-                      f"http://{ip_port}/iptv/live/1000.json?key=txiptv",
-                      f"http://{ip_port}/ZHGXTV/Public/json/live_interface.txt",
-                      f"http://{ip_port}/",
-                      f"http://{ip_port}/iptv/live/",
-                      f"http://{ip_port}/ZHGXTV/Public/json/"
-                  ]
-                  session = requests.Session()
-                  for url in test_urls:
-                      try:
-                          response = session.get(url, timeout=timeout, headers=SOURCE_HEADERS, verify=False)
-                          print(f"  {ip_port}: 尝试 {url} - 状态码: {response.status_code}")
-                          if response.status_code == 200:
-                              content_type = response.headers.get('Content-Type', '')
-                              content = response.text[:100]
-                              if "1000.json" in url or "json" in content_type.lower():
-                                  try:
-                                      json_data = response.json()
-                                      if "data" in json_data or "code" in json_data:
-                                          print(f"  {ip_port}: JSON接口可用")
-                                          return True, f"http://{ip_port}/iptv/live/1000.json?key=txiptv"
-                                  except:
-                                      pass
-                              if "live_interface.txt" in url or "txt" in content_type.lower() or ("CCTV" in content and "," in content):
-                                  print(f"  {ip_port}: TXT接口可用")
-                                  return True, f"http://{ip_port}/ZHGXTV/Public/json/live_interface.txt"
-                              if response.status_code == 200 and len(response.content) > 0:
-                                  print(f"  {ip_port}: HTTP服务可用 (URL: {url})")
-                                  if "iptv" in url:
-                                      return True, f"http://{ip_port}/iptv/live/1000.json?key=txiptv"
-                                  elif "ZHGXTV" in url:
-                                      return True, f"http://{ip_port}/ZHGXTV/Public/json/live_interface.txt"
-                                  else:
-                                      return True, url
-                      except requests.exceptions.ConnectionError:
-                          continue
-                      except requests.exceptions.Timeout:
-                          continue
-                      except Exception as e:
-                          continue
-                  print(f"  {ip_port}: 所有接口测试失败")
+                  sock.close()
+                  # 调用精简检测函数
+                  valid_url = check_single_ip(ip_port)
+                  if valid_url:
+                      return True, valid_url
+                  print(f"  {ip_port}: 所有接口检测失败")
                   return False, None
               except Exception as e:
                   print(f"  {ip_port}: 检测异常 - {str(e)[:50]}")
                   return False, None
           
+          # 频道解析
           def hotel_channels_from_ip_port(ip_port, interface_url):
-              """从IP:端口的接口解析频道信息"""
               hotel_channels = []
               try:
-                  response = requests.get(interface_url, timeout=10, headers=SOURCE_HEADERS, verify=False)
-                  if "iptv" in interface_url or "json" in interface_url:
-                      try:
-                          json_data = response.json()
-                          if isinstance(json_data, dict):
-                              if "data" in json_data and isinstance(json_data["data"], list):
-                                  for item in json_data["data"]:
-                                      if isinstance(item, dict):
-                                          name = item.get('name', '') or item.get('channel_name', '') or item.get('title', '')
-                                          urlx = item.get('url', '') or item.get('urlx', '') or item.get('stream_url', '')
-                                          if name and urlx:
-                                              if not urlx.startswith('/'):
-                                                  urlx = '/' + urlx
-                                              urld = f"http://{ip_port}{urlx}"
-                                              hotel_channels.append((name, urld))
-                          elif isinstance(json_data, list):
-                              for item in json_data:
-                                  if isinstance(item, dict):
-                                      name = item.get('name', '') or item.get('channel_name', '') or item.get('title', '')
-                                      urlx = item.get('url', '') or item.get('urlx', '') or item.get('stream_url', '')
-                                      if name and urlx:
-                                          if not urlx.startswith('/'):
-                                              urlx = '/' + urlx
-                                              urld = f"http://{ip_port}{urlx}"
-                                              hotel_channels.append((name, urld))
-                      except json.JSONDecodeError:
-                          pass
-                  content = response.text
-                  lines = content.split('\n')
-                  for line in lines:
-                      line = line.strip()
-                      if not line or line.startswith('#') or ',' not in line:
-                          continue
-                      parts = line.split(',', 1)
-                      if len(parts) < 2:
-                          continue
-                      name = parts[0].strip()
-                      full_url = parts[1].strip()
-                      parsed_url = urlparse(full_url)
-                      path = parsed_url.path
-                      if parsed_url.query:
-                          path += '?' + parsed_url.query
-                      urld = f"http://{ip_port}{path}"
-                      hotel_channels.append((name, urld))
-                  if not hotel_channels and "CCTV" in content and ("m3u8" in content or ".ts" in content):
-                      pattern = r'([^,]+?CCTV[^,]*?),([^\s]+)'
-                      matches = re.findall(pattern, content)
-                      for name, url in matches:
-                          parsed_url = urlparse(url.strip())
-                          path = parsed_url.path
-                          if parsed_url.query:
-                              path += '?' + parsed_url.query
-                          urld = f"http://{ip_port}{path}"
-                          hotel_channels.append((name.strip(), urld))
+                  urls = interface_url.split('/', 3)
+                  url_x = f"{urls[0]}//{urls[2]}"
+                  current_ip_port = urls[2]
+                  if "ZHGXTV" in interface_url:
+                      response = requests.get(interface_url, timeout=2, headers=HEADERS, verify=False)
+                      json_data = response.content.decode('utf-8')
+                      for line in json_data.split('\n'):
+                          line = line.strip()
+                          if not line or "," not in line:
+                              continue
+                          if "hls" in line or "m3u8" in line:
+                              name, channel_url = line.split(',', 1)
+                              channel_url = re.sub(r'(\d+\.\d+\.\d+\.\d+)(:\d+)?/', f'{current_ip_port}/', channel_url)
+                              hotel_channels.append((name.strip(), channel_url.strip()))
+                  elif "iptv" in interface_url:
+                      response = requests.get(interface_url, timeout=3, headers=HEADERS, verify=False)
+                      json_data = response.json()
+                      for item in json_data.get('data', []):
+                          if isinstance(item, dict):
+                              name = item.get('name', '').strip()
+                              urlx = item.get('url', '').strip()
+                              if name and urlx and ("tsfile" in urlx or "m3u8" in urlx):
+                                  if not urlx.startswith('/'):
+                                      urlx = '/' + urlx
+                                  urld = f"{url_x}{urlx}"
+                                  hotel_channels.append((name, urld))
                   return hotel_channels
               except Exception as e:
-                  print(f"解析频道错误 {interface_url}: {e}")
+                  print(f"解析频道错误 {interface_url}: {str(e)[:30]}")
                   return []
           
           def calculate_standard_deviation(data):
@@ -234,7 +177,6 @@ jobs:
               variance = sum((x - mean) ** 2 for x in data) / len(data)
               return math.sqrt(variance)
           
-          # 单个TS分片下载测速函数（供内层多线程调用）
           def test_single_ts(ts_url, session):
               """测试单个TS分片，返回耗时/是否有效"""
               try:
@@ -259,7 +201,7 @@ jobs:
               """智能TS分片检测（内层多线程下载TS分片）"""
               try:
                   session = requests.Session()
-                  session.headers.update(SOURCE_HEADERS)
+                  session.headers.update(HEADERS)
                   session.mount('http://', requests.adapters.HTTPAdapter(max_retries=2))
                   session.mount('https://', requests.adapters.HTTPAdapter(max_retries=2))
                   
@@ -280,7 +222,6 @@ jobs:
                               if bytes_downloaded >= MIN_CHUNK_SIZE:
                                   cost = round(time.time() - start, 2)
                                   ts_costs.append(cost)
-                      # 核心校验：兜底分支也必须满足MIN_VALID_TS要求
                       if len(ts_costs) < MIN_VALID_TS:
                           return False, [], 0.0, 0.0, ts_costs
                       avg_cost = round(sum(ts_costs) / len(ts_costs), 2)
@@ -313,7 +254,6 @@ jobs:
                       return False, [], 0.0, 0.0, []
                   
                   ts_costs = []
-                  # 多线程测试TS分片
                   with ThreadPoolExecutor(max_workers=TS_THREAD_NUM) as ts_executor:
                       ts_futures = {ts_executor.submit(test_single_ts, ts_url, session): ts_url for ts_url in ts_urls[:TEST_TS_NUM]}
                       for future in as_completed(ts_futures):
@@ -321,7 +261,6 @@ jobs:
                           if cost is not None:
                               ts_costs.append(cost)
                   
-                  # 核心校验：m3u8分支校验
                   if len(ts_costs) < MIN_VALID_TS:
                       return False, [], 0.0, 0.0, ts_costs
                   
@@ -385,26 +324,20 @@ jobs:
                       best_dev = cost_dev
               return best_cost, best_stable, best_quality, tested, best_dev
           
-          # 单个IP的测速处理函数（供外层多线程调用）
           def process_single_ip(ip_port, interface_url, result_list, lock):
               """处理单个IP的频道解析+测速，线程安全写入结果"""
               try:
                   print(f"  并发处理 {ip_port}...")
                   channels = hotel_channels_from_ip_port(ip_port, interface_url)
                   if not channels:
-                      print(f"    {ip_port}: 无频道信息，尝试备用接口...")
-                      alt_url = f"http://{ip_port}/ZHGXTV/Public/json/live_interface.txt" if "iptv" in interface_url else f"http://{ip_port}/iptv/live/1000.json?key=txiptv"
-                      channels = hotel_channels_from_ip_port(ip_port, alt_url)
-                  if not channels:
-                      print(f"    {ip_port}: 无频道信息，跳过")
+                      print(f"    {ip_port}: 无有效频道信息，跳过")
                       return
                   cctv_channels = [(name, url) for name, url in channels if "CCTV" in name.upper()] or channels
-                  print(f"    {ip_port}: 找到 {len(cctv_channels)} 个频道，仅测1个核心频道...")
+                  print(f"    {ip_port}: 找到 {len(cctv_channels)} 个有效频道，仅测1个核心频道...")
                   best_cost, best_stable, best_quality, tested_count, best_dev = batch_stream_test(ip_port, cctv_channels)
                   if tested_count == 0 or best_cost is None:
                       print(f"    {ip_port}: 跳过 | 无有效分片下载耗时（流失效/超时）")
                       return
-                  # 线程安全写入结果
                   with lock:
                       result_list.append((ip_port, (best_cost, best_stable, best_quality, best_dev)))
                   stable_tag = "✅稳定" if best_stable else "⚠️不稳定"
@@ -413,14 +346,14 @@ jobs:
                   print(f"    {ip_port}: 处理失败 - {e}")
           
           def hotel_ip_port_from_urls():
-              """主函数：提取IP端口+统计耗时（外层多线程测速）"""
+              """主函数：提取IP端口+统计耗时"""
               fofa_ip_set = fofa_crawl_ip()
               url_ip_set = set()
               
               print("\n步骤1: 从直播源URL提取含hls/、tsfile/live/的IP和端口...")
               for url in SOURCE_URLS:
                   try:
-                      response = requests.get(url, timeout=15, headers=SOURCE_HEADERS, verify=False)
+                      response = requests.get(url, timeout=15, headers=HEADERS, verify=False)
                       response.raise_for_status()
                       lines = response.text.splitlines()
                       for line in lines:
@@ -447,7 +380,7 @@ jobs:
               
               print(f"\n步骤2: 检测IP端口有效性...")
               available_ips = []
-              with ThreadPoolExecutor(max_workers=10) as executor:
+              with ThreadPoolExecutor(max_workers=CHECK_THREAD_NUM) as executor:
                   future_to_ip = {executor.submit(check_ip_availability, ip_port): ip_port for ip_port in ip_port_list}
                   for future in as_completed(future_to_ip):
                       ip_port = future_to_ip[future]
@@ -469,14 +402,12 @@ jobs:
               
               print(f"\n步骤3: 多线程解析频道信息并统计下载耗时...")
               speed_tested_ips = []
-              lock = threading.Lock()  # 线程锁，保证结果写入安全
-              # 外层多线程处理所有可用IP
+              lock = threading.Lock()
               with ThreadPoolExecutor(max_workers=IP_THREAD_NUM) as ip_executor:
-                  # 提交所有IP测速任务
                   for ip_port, interface_url in available_ips:
                       ip_executor.submit(process_single_ip, ip_port, interface_url, speed_tested_ips, lock)
               
-              # 核心排序规则：按下载耗时升序
+              # 按下载耗时升序排序
               speed_tested_ips.sort(key=lambda x: x[1][0])
               print(f"\n步骤4: 保存所有有效IP端口（按下载耗时升序）...")
               output_dir = "Hotel/ip"
