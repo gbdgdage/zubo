@@ -71,7 +71,7 @@ jobs:
           MIN_CHUNK_SIZE = 512  # 最小有效分片大小（字节）
           MIN_VALID_TS = 2      # 最小有效TS分片数，低于此值判定为不可用
           # 多线程配置
-          CHECK_THREAD_NUM = 10 # IP有效性检测并发数（轻量任务：TCP+接口检测）
+          CHECK_THREAD_NUM = 10 # IP有效性检测并发数（轻量任务：接口检测）
           IP_THREAD_NUM = 15    # IP测速解析并发数（重量级任务：频道解析+TS下载测速）
           TS_THREAD_NUM = 3     # 内层TS分片并发下载线程数（贴合TEST_TS_NUM）
           # ======================================================
@@ -98,7 +98,7 @@ jobs:
                   print(f"【FOFA爬取】异常: {str(e)[:50]}")
               return ip_port_set
           
-          # IP检测 + 多核心接口遍历
+          # IP可用性检测
           def check_single_ip(ip_port):
               url_ends = ["/iptv/live/1000.json?key=txiptv", "/ZHGXTV/Public/json/live_interface.txt"]
               for end in url_ends:
@@ -112,19 +112,8 @@ jobs:
                   except:
                       continue
               return None
-          
-          # 轻量IP有效性检测
           def check_ip_availability(ip_port, timeout=5):
               try:
-                  ip, port = ip_port.split(':')
-                  # 轻量TCP连接基础校验
-                  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                  sock.settimeout(2)
-                  if sock.connect_ex((ip, int(port))) != 0:
-                      print(f"  {ip_port}: TCP连接失败")
-                      return False, None
-                  sock.close()
-                  # 调用精简检测函数
                   valid_url = check_single_ip(ip_port)
                   if valid_url:
                       return True, valid_url
