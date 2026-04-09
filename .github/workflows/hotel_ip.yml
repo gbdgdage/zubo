@@ -193,9 +193,9 @@ jobs:
                   resp = session.head(ts_url, timeout=3, allow_redirects=True)
                   size = int(resp.headers.get("Content-Length", 0))
                   mb = size / 1024 / 1024
-                  if mb >= 2.5:
+                  if mb >= 4.0:
                       return "1080P", 3
-                  elif mb >= 1.0:
+                  elif mb >= 2.0:
                       return "720P", 2
                   else:
                       return "低清", 1
