@@ -1,9 +1,12 @@
 name: hotel
 
 on:
-  schedule:
-    - cron: "0 23 * * 6"
-  workflow_dispatch:          
+  #schedule:
+    #- cron: "0 23 * * 6"
+  workflow_run:
+    workflows: ["hotel_ip"]  # 监听workflow
+    types: [completed]
+  workflow_dispatch:  # 保留手动触发          
 
 jobs:
   fetch-and-push:
