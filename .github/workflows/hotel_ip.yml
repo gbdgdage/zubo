@@ -185,7 +185,23 @@ jobs:
                   return cost
               except Exception as e:
                   return None
-          
+
+          # 分辨率判断（按TS大小）
+          def get_ts_size_and_res(ts_url, session):
+              """获取TS大小并判断分辨率：1080P/720P/低清"""
+              try:
+                  resp = session.head(ts_url, timeout=3, allow_redirects=True)
+                  size = int(resp.headers.get("Content-Length", 0))
+                  mb = size / 1024 / 1024
+                  if mb >= 2.5:
+                      return "1080P", 3
+                  elif mb >= 1.0:
+                      return "720P", 2
+                  else:
+                      return "低清", 1
+              except:
+                  return "未知", 0
+
           def smart_ts_detection(channel_url):
               """智能TS分片检测（内层多线程下载TS分片）"""
               try:
@@ -212,10 +228,10 @@ jobs:
                                   cost = round(time.time() - start, 2)
                                   ts_costs.append(cost)
                       if len(ts_costs) < MIN_VALID_TS:
-                          return False, [], 0.0, 0.0, ts_costs
+                          return False, [], 0.0, 0.0, ts_costs, 0, "未知"
                       avg_cost = round(sum(ts_costs) / len(ts_costs), 2)
                       cost_dev = round(calculate_standard_deviation(ts_costs), 2)
-                      return True, [channel_url]*len(ts_costs), avg_cost, cost_dev, ts_costs
+                      return True, [channel_url]*len(ts_costs), avg_cost, cost_dev, ts_costs, 0, "未知"
                   
                   m3u8_content = m3u8_resp.text
                   base_url = channel_url.rsplit('/', 1)[0] + '/' if '/' in channel_url else channel_url + '/'
@@ -240,8 +256,11 @@ jobs:
                   
                   ts_urls = extract_all_ts(m3u8_content, base_url)
                   if not ts_urls:
-                      return False, [], 0.0, 0.0, []
+                      return False, [], 0.0, 0.0, [], 0, "未知"
                   
+                  # 获取分辨率等级
+                  res_name, res_level = get_ts_size_and_res(ts_urls[0], session)
+
                   ts_costs = []
                   with ThreadPoolExecutor(max_workers=TS_THREAD_NUM) as ts_executor:
                       ts_futures = {ts_executor.submit(test_single_ts, ts_url, session): ts_url for ts_url in ts_urls[:TEST_TS_NUM]}
@@ -251,20 +270,20 @@ jobs:
                               ts_costs.append(cost)
                   
                   if len(ts_costs) < MIN_VALID_TS:
-                      return False, [], 0.0, 0.0, ts_costs
+                      return False, [], 0.0, 0.0, ts_costs, 0, "未知"
                   
                   avg_cost = round(sum(ts_costs) / len(ts_costs), 2)
                   cost_dev = round(calculate_standard_deviation(ts_costs), 2)
-                  return True, ts_urls, avg_cost, cost_dev, ts_costs
+                  return True, ts_urls, avg_cost, cost_dev, ts_costs, res_level, res_name
               except Exception as e:
-                  return False, [], 0.0, 0.0, []
+                  return False, [], 0.0, 0.0, [], 0, "未知"
           
           def merged_stream_test(channel_url):
-              """流测试 - 仅统计耗时/波动/质量分"""
+              """流测试 - 仅统计耗时/波动/质量分/分辨率"""
               try:
-                  has_stream, urls, avg_cost, cost_dev, ts_costs = smart_ts_detection(channel_url)
+                  has_stream, urls, avg_cost, cost_dev, ts_costs, res_level, res_name = smart_ts_detection(channel_url)
                   if not has_stream:
-                      return False, 0.0, False, 0, "流不可用", 0.0, ts_costs
+                      return False, 0.0, False, 0, "流不可用", 0.0, ts_costs, 0, "未知"
                   if avg_cost <= 3 and cost_dev <= 0.8:
                       quality = 95
                       stable = True
@@ -282,9 +301,9 @@ jobs:
                   elif len(urls) >= 4:
                       quality += 3
                   quality = min(100, quality)
-                  return True, avg_cost, stable, quality, "流可用(仅统计耗时)", cost_dev, ts_costs
+                  return True, avg_cost, stable, quality, "流可用(仅统计耗时)", cost_dev, ts_costs, res_level, res_name
               except Exception as e:
-                  return False, 0.0, False, 0, f"检测失败: {str(e)[:20]}", 0.0, []
+                  return False, 0.0, False, 0, f"检测失败: {str(e)[:20]}", 0.0, [], 0, "未知"
           
           def batch_stream_test(ip_port, channels):
               """批量测试频道 - 仅测试1个首个CCTV频道"""
@@ -292,6 +311,8 @@ jobs:
               best_stable = False
               best_quality = 0
               best_dev = 999.99
+              best_res_level = 0
+              best_res_name = "未知"
               tested = 0
               priority_channels = []
               for name, url in channels:
@@ -302,16 +323,18 @@ jobs:
               if test_channel:
                   tested += 1
                   channel_name, channel_url = test_channel
-                  available, cost, stable, quality, diagnosis, cost_dev, ts_costs = merged_stream_test(channel_url)
+                  available, cost, stable, quality, diagnosis, cost_dev, ts_costs, res_level, res_name = merged_stream_test(channel_url)
                   if not available:
                       print(f"      {channel_name}: ❌ {diagnosis} | 分片耗时: {ts_costs} | 波动: {cost_dev}")
                   else:
-                      print(f"      {channel_name}: ✅ {diagnosis} | 平均耗时: {cost}秒 | 分片耗时: {ts_costs} | 波动: {cost_dev} | 质量: {quality}分")
+                      print(f"      {channel_name}: ✅ {diagnosis} | 分辨率:{res_name} | 平均耗时: {cost}秒 | 波动: {cost_dev} | 质量: {quality}分")
                       best_cost = cost
                       best_stable = stable
                       best_quality = quality
                       best_dev = cost_dev
-              return best_cost, best_stable, best_quality, tested, best_dev
+                      best_res_level = res_level
+                      best_res_name = res_name
+              return best_cost, best_stable, best_quality, tested, best_dev, best_res_level, best_res_name
           
           def process_single_ip(ip_port, interface_url, result_list, lock):
               """处理单个IP的频道解析+测速，线程安全写入结果"""
@@ -323,19 +346,18 @@ jobs:
                       return
                   cctv_channels = [(name, url) for name, url in channels if "CCTV" in name.upper()] or channels
                   print(f"    {ip_port}: 找到 {len(cctv_channels)} 个有效频道，仅测1个核心频道...")
-                  best_cost, best_stable, best_quality, tested_count, best_dev = batch_stream_test(ip_port, cctv_channels)
+                  best_cost, best_stable, best_quality, tested_count, best_dev, best_res_level, best_res_name = batch_stream_test(ip_port, cctv_channels)
                   if tested_count == 0 or best_cost is None:
                       print(f"    {ip_port}: 跳过 | 无有效分片下载耗时（流失效/超时）")
                       return
                   with lock:
-                      result_list.append((ip_port, (best_cost, best_stable, best_quality, best_dev)))
+                      result_list.append((ip_port, (best_cost, best_stable, best_quality, best_dev, best_res_level, best_res_name)))
                   stable_tag = "✅稳定" if best_stable else "⚠️不稳定"
-                  print(f"    {ip_port}: {stable_tag} 已统计 | 下载耗时: {best_cost:.2f}秒 | 波动: {best_dev:.2f} | 质量: {best_quality}分")
+                  print(f"    {ip_port}: {stable_tag} | 分辨率:{best_res_name} | 耗时: {best_cost:.2f}秒 | 波动: {best_dev:.2f} | 质量: {best_quality}分")
               except Exception as e:
                   print(f"    {ip_port}: 处理失败 - {e}")
           
           def hotel_ip_port_from_urls():
-              """主函数：提取IP端口+统计耗时"""
               fofa_ip_set = fofa_crawl_ip()
               url_ip_set = set()
               
@@ -396,9 +418,11 @@ jobs:
                   for ip_port, interface_url in available_ips:
                       ip_executor.submit(process_single_ip, ip_port, interface_url, speed_tested_ips, lock)
               
-              # 按下载耗时升序排序
-              speed_tested_ips.sort(key=lambda x: x[1][0])
-              print(f"\n步骤4: 保存所有有效IP端口（按下载耗时升序）...")
+              # ===================== 核心：双条件排序 =====================
+              # 先按分辨率等级降序，同分辨率按耗时升序
+              speed_tested_ips.sort(key=lambda x: (-x[1][4], x[1][0]))
+              
+              print(f"\n步骤4: 保存所有有效IP端口（按 分辨率→耗时 排序）...")
               output_dir = "Hotel/ip"
               os.makedirs(output_dir, exist_ok=True)
               output_file = os.path.join(output_dir, "hotel_ip.txt")
@@ -423,11 +447,11 @@ jobs:
               print("="*80)
               
               if speed_tested_ips:
-                  print(f"\n有效IP端口(按下载耗时升序排列):")
+                  print(f"\n有效IP端口(按 分辨率→耗时 排序):")
                   show_num = min(50, len(speed_tested_ips))
-                  for i, (ip_port, (cost, stable, quality, dev)) in enumerate(speed_tested_ips[:show_num], 1):
+                  for i, (ip_port, (cost, stable, quality, dev, res_level, res_name)) in enumerate(speed_tested_ips[:show_num], 1):
                       stable_tag = "✅" if stable else "⚠️"
-                      print(f"  {i:2d}. {ip_port} | {stable_tag} 耗时: {cost:.2f}秒 | 波动: {dev:.2f} | 质量: {quality}分")
+                      print(f"  {i:2d}. {ip_port} | {stable_tag} {res_name} | 耗时: {cost:.2f}秒 | 波动: {dev:.2f} | 质量: {quality}分")
                   if len(speed_tested_ips) > show_num:
                       print(f"  ... 还有 {len(speed_tested_ips)-show_num} 个有效IP端口")
               else:
