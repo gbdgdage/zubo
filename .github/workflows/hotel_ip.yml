@@ -6,24 +6,24 @@ on:
 jobs:
   hotel-ip:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           cache: 'pip'
-
-      - name: Install dependencies & ffmpeg
+            
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pysocks
-          sudo apt update
-          sudo apt install -y ffmpeg
-
-      - name: 提取IP端口 + 分辨率识别
+          pip install requests
+          pip install pysocks
+        
+      - name: 提取ip_port
         run: |
           cat > hotel_ip_port.py << 'EOF'
           import requests
@@ -34,11 +34,11 @@ jobs:
           import json
           import socket
           import threading
-          import subprocess
           from urllib.parse import urlparse
           from concurrent.futures import ThreadPoolExecutor, as_completed
-
-          # ===================== 全局配置 =====================
+          
+          # ===================== 全局配置区 =====================
+          # 直播源URL列表
           SOURCE_URLS = [
               "https://raw.githubusercontent.com/mzky/checklist/refs/heads/master/itvlist.m3u",
               "https://github.com/adminouyang/TV-yjc/raw/refs/heads/main/Hotel/iptv.txt",
@@ -46,14 +46,16 @@ jobs:
               "https://lisa3456.github.io/hotel.txt",
               "https://gongdian.top/tv/guovin"
           ]
-
+          
+          # FOFA专属配置 - 独立请求头+搜索地址
           FOFA_URL = "https://fofa.info/result?qbase64=ImlwdHYvbGl2ZS96aF9jbi5qcyIgJiYgY291bnRyeT0iQ04i"
           FOFA_HEADERS = {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
               "Referer": "https://fofa.info/",
               "Accept-Language": "zh-CN,zh;q=0.9"
           }
-
+          
+          # 全局请求头（统一检测/解析/测速全流程）
           HEADERS = {
               'User-Agent': 'okhttp/5.1.0',
               'Accept': '*/*',
@@ -61,32 +63,21 @@ jobs:
               'Connection': 'keep-alive',
               'Accept-Encoding': 'gzip, deflate',
           }
-
-          DETECT_TIMEOUT = 8
-          TEST_TS_NUM = 3
-          MIN_CHUNK_SIZE = 512
-          MIN_VALID_TS = 2
-          CHECK_THREAD_NUM = 10
-          IP_THREAD_NUM = 15
-          TS_THREAD_NUM = 3
+          
+          # 测速配置项
+          DETECT_TIMEOUT = 8    # 单分片最大下载硬超时（秒）
+          TEST_TS_NUM = 3       # 测试分片数
+          COST_DEV_THRESH = 1.5 # 耗时波动参考值（仅统计，不判定）
+          MIN_CHUNK_SIZE = 512  # 最小有效分片大小（字节）
+          MIN_VALID_TS = 2      # 最小有效TS分片数，低于此值判定为不可用
+          # 多线程配置
+          CHECK_THREAD_NUM = 10 # IP有效性检测并发数（轻量任务：接口检测）
+          IP_THREAD_NUM = 15    # IP测速解析并发数（重量级任务：频道解析+TS下载测速）
+          TS_THREAD_NUM = 3     # 内层TS分片并发下载线程数（贴合TEST_TS_NUM）
           # ======================================================
-
-          def get_video_resolution(ts_url):
-              try:
-                  cmd = [
-                      'ffprobe', '-v', 'error',
-                      '-select_streams', 'v:0',
-                      '-show_entries', 'stream=width,height',
-                      '-of', 'csv=s=x:p=0',
-                      '-timeout', '5000000',
-                      ts_url
-                  ]
-                  res = subprocess.check_output(cmd, timeout=7).decode().strip()
-                  return res if 'x' in res else 'unknown'
-              except:
-                  return 'unknown'
-
+          
           def fofa_crawl_ip():
+              """从FOFA搜索iptv/live/相关"""
               ip_port_set = set()
               print("【FOFA爬取】开始搜索iptv/live/相关IP:端口...")
               try:
@@ -95,6 +86,9 @@ jobs:
                       print(f"【FOFA爬取】请求失败，状态码: {resp.status_code}")
                       return ip_port_set
                   ip_port_matches = re.findall(r'<a href="http://([\d\.]+:\d+)"', resp.text)
+                  if not ip_port_matches:
+                      print(f"【FOFA爬取】未匹配到任何IP:端口")
+                      return ip_port_set
                   for ip_port in ip_port_matches:
                       ip = ip_port.split(':')[0]
                       if not ip.startswith(('10.', '172.16.', '192.168.', '127.', '169.254.')):
@@ -103,7 +97,8 @@ jobs:
               except Exception as e:
                   print(f"【FOFA爬取】异常: {str(e)[:50]}")
               return ip_port_set
-
+          
+          # IP可用性检测
           def check_single_ip(ip_port):
               url_ends = ["/iptv/live/1000.json?key=txiptv", "/ZHGXTV/Public/json/live_interface.txt"]
               for end in url_ends:
@@ -112,20 +107,23 @@ jobs:
                       resp = requests.get(url, timeout=3, headers=HEADERS, verify=False)
                       resp.raise_for_status()
                       if "tsfile" in resp.text or "hls" in resp.text or "m3u8" in resp.text:
+                          print(f"  {ip_port}: 检测通过 {url}")
                           return url
                   except:
                       continue
               return None
-
           def check_ip_availability(ip_port, timeout=5):
               try:
                   valid_url = check_single_ip(ip_port)
                   if valid_url:
                       return True, valid_url
+                  print(f"  {ip_port}: 所有接口检测失败")
                   return False, None
-              except:
+              except Exception as e:
+                  print(f"  {ip_port}: 检测异常 - {str(e)[:50]}")
                   return False, None
-
+          
+          # 频道解析
           def hotel_channels_from_ip_port(ip_port, interface_url):
               hotel_channels = []
               try:
@@ -155,18 +153,21 @@ jobs:
                                       urlx = '/' + urlx
                                   urld = f"{url_x}{urlx}"
                                   hotel_channels.append((name, urld))
-              except:
-                  pass
-              return hotel_channels
-
+                  return hotel_channels
+              except Exception as e:
+                  print(f"解析频道错误 {interface_url}: {str(e)[:30]}")
+                  return []
+          
           def calculate_standard_deviation(data):
+              """计算列表标准差（衡量耗时波动）"""
               if len(data) < 2:
                   return 0.0
               mean = sum(data) / len(data)
               variance = sum((x - mean) ** 2 for x in data) / len(data)
               return math.sqrt(variance)
-
+          
           def test_single_ts(ts_url, session):
+              """测试单个TS分片，返回耗时/是否有效"""
               try:
                   start = time.time()
                   ts_resp = session.get(ts_url, timeout=DETECT_TIMEOUT, stream=True, verify=False)
@@ -180,164 +181,269 @@ jobs:
                               break
                   if bytes_downloaded < MIN_CHUNK_SIZE:
                       return None
-                  return round(time.time() - start, 2)
-              except:
+                  cost = round(time.time() - start, 2)
+                  return cost
+              except Exception as e:
                   return None
-
+          
           def smart_ts_detection(channel_url):
+              """智能TS分片检测（内层多线程下载TS分片）"""
               try:
                   session = requests.Session()
                   session.headers.update(HEADERS)
                   session.mount('http://', requests.adapters.HTTPAdapter(max_retries=2))
                   session.mount('https://', requests.adapters.HTTPAdapter(max_retries=2))
+                  
                   m3u8_resp = session.get(channel_url, timeout=5, verify=False)
-                  resolution = "unknown"
-
                   if m3u8_resp.status_code != 200:
+                      # 兜底：直接TS流检测，MIN_VALID_TS校验
                       ts_costs = []
-                      for _ in range(TEST_TS_NUM):
-                          cost = test_single_ts(channel_url, session)
-                          if cost:
-                              ts_costs.append(cost)
+                      for i in range(TEST_TS_NUM):
+                          start = time.time()
+                          stream_resp = session.get(channel_url, timeout=DETECT_TIMEOUT, stream=True, verify=False)
+                          if stream_resp.status_code == 200:
+                              bytes_downloaded = 0
+                              for chunk in stream_resp.iter_content(chunk_size=8192):
+                                  if chunk:
+                                      bytes_downloaded += len(chunk)
+                                      if time.time() - start >= DETECT_TIMEOUT:
+                                          break
+                              if bytes_downloaded >= MIN_CHUNK_SIZE:
+                                  cost = round(time.time() - start, 2)
+                                  ts_costs.append(cost)
                       if len(ts_costs) < MIN_VALID_TS:
-                          return False, [], 0.0, 0.0, [], resolution
-                      resolution = get_video_resolution(channel_url)
-                      avg_cost = round(sum(ts_costs)/len(ts_costs),2)
-                      dev = round(calculate_standard_deviation(ts_costs),2)
-                      return True, [], avg_cost, dev, ts_costs, resolution
-
+                          return False, [], 0.0, 0.0, ts_costs
+                      avg_cost = round(sum(ts_costs) / len(ts_costs), 2)
+                      cost_dev = round(calculate_standard_deviation(ts_costs), 2)
+                      return True, [channel_url]*len(ts_costs), avg_cost, cost_dev, ts_costs
+                  
                   m3u8_content = m3u8_resp.text
-                  base_url = channel_url.rsplit('/',1)[0]+'/' if '/' in channel_url else channel_url+'/'
-
-                  def extract_all_ts(content, base):
-                      ts = []
-                      for line in content.split():
+                  base_url = channel_url.rsplit('/', 1)[0] + '/' if '/' in channel_url else channel_url + '/'
+                  
+                  def extract_all_ts(content, current_base):
+                      ts_list = []
+                      for line in content.strip().split('\n'):
                           line = line.strip()
-                          if line.startswith('#'): continue
+                          if not line or line.startswith('#'):
+                              continue
                           if line.endswith('.ts') or '.ts?' in line:
-                              ts.append(line if line.startswith('http') else base+line)
-                      return ts
-
+                              ts_list.append(line if line.startswith('http') else current_base + line)
+                          elif line.endswith('.m3u8'):
+                              try:
+                                  nested_url = line if line.startswith('http') else current_base + line
+                                  nested_resp = session.get(nested_url, timeout=3, verify=False)
+                                  if nested_resp.status_code == 200:
+                                      ts_list.extend(extract_all_ts(nested_resp.text, nested_url.rsplit('/', 1)[0] + '/'))
+                              except:
+                                  pass
+                      return ts_list
+                  
                   ts_urls = extract_all_ts(m3u8_content, base_url)
-                  if ts_urls:
-                      resolution = get_video_resolution(ts_urls[0])
-
+                  if not ts_urls:
+                      return False, [], 0.0, 0.0, []
+                  
                   ts_costs = []
-                  with ThreadPoolExecutor(TS_THREAD_NUM) as e:
-                      fut = {e.submit(test_single_ts, u, session):u for u in ts_urls[:TEST_TS_NUM]}
-                      for f in as_completed(fut):
-                          c = f.result()
-                          if c: ts_costs.append(c)
-
+                  with ThreadPoolExecutor(max_workers=TS_THREAD_NUM) as ts_executor:
+                      ts_futures = {ts_executor.submit(test_single_ts, ts_url, session): ts_url for ts_url in ts_urls[:TEST_TS_NUM]}
+                      for future in as_completed(ts_futures):
+                          cost = future.result()
+                          if cost is not None:
+                              ts_costs.append(cost)
+                  
                   if len(ts_costs) < MIN_VALID_TS:
-                      return False, ts_urls, 0,0,ts_costs,resolution
-                  avg = round(sum(ts_costs)/len(ts_costs),2)
-                  dev = round(calculate_standard_deviation(ts_costs),2)
-                  return True, ts_urls, avg, dev, ts_costs, resolution
-              except:
-                  return False, [],0,0,[],'unknown'
-
+                      return False, [], 0.0, 0.0, ts_costs
+                  
+                  avg_cost = round(sum(ts_costs) / len(ts_costs), 2)
+                  cost_dev = round(calculate_standard_deviation(ts_costs), 2)
+                  return True, ts_urls, avg_cost, cost_dev, ts_costs
+              except Exception as e:
+                  return False, [], 0.0, 0.0, []
+          
           def merged_stream_test(channel_url):
+              """流测试 - 仅统计耗时/波动/质量分"""
               try:
-                  ok, urls, avg, dev, costs, reso = smart_ts_detection(channel_url)
-                  if not ok:
-                      return False,0,False,0,"流失效",0,costs,reso
-                  quality = 60
-                  stable = False
-                  if avg<=3 and dev<=0.8:
-                      quality=95;stable=True
-                  elif avg<=6 and dev<=1.2:
-                      quality=80;stable=True
-                  elif avg<=10 and dev<=2.0:
-                      quality=70;stable=True
-                  return True,avg,stable,quality,"正常",dev,costs,reso
-              except:
-                  return False,0,False,0,"异常",0,[],'unknown'
-
+                  has_stream, urls, avg_cost, cost_dev, ts_costs = smart_ts_detection(channel_url)
+                  if not has_stream:
+                      return False, 0.0, False, 0, "流不可用", 0.0, ts_costs
+                  if avg_cost <= 3 and cost_dev <= 0.8:
+                      quality = 95
+                      stable = True
+                  elif avg_cost <= 6 and cost_dev <= 1.2:
+                      quality = 80
+                      stable = True
+                  elif avg_cost <= 10 and cost_dev <= 2.0:
+                      quality = 70
+                      stable = True
+                  else:
+                      quality = 60
+                      stable = False
+                  if len(urls) >= 6:
+                      quality += 5
+                  elif len(urls) >= 4:
+                      quality += 3
+                  quality = min(100, quality)
+                  return True, avg_cost, stable, quality, "流可用(仅统计耗时)", cost_dev, ts_costs
+              except Exception as e:
+                  return False, 0.0, False, 0, f"检测失败: {str(e)[:20]}", 0.0, []
+          
           def batch_stream_test(ip_port, channels):
-              best = None
+              """批量测试频道 - 仅测试1个首个CCTV频道"""
+              best_cost = None
+              best_stable = False
+              best_quality = 0
+              best_dev = 999.99
+              tested = 0
+              priority_channels = []
+              for name, url in channels:
+                  if "CCTV" in name.upper():
+                      priority_channels.append((name, url))
+                      break
+              test_channel = priority_channels[0] if priority_channels else (channels[0] if channels else None)
+              if test_channel:
+                  tested += 1
+                  channel_name, channel_url = test_channel
+                  available, cost, stable, quality, diagnosis, cost_dev, ts_costs = merged_stream_test(channel_url)
+                  if not available:
+                      print(f"      {channel_name}: ❌ {diagnosis} | 分片耗时: {ts_costs} | 波动: {cost_dev}")
+                  else:
+                      print(f"      {channel_name}: ✅ {diagnosis} | 平均耗时: {cost}秒 | 分片耗时: {ts_costs} | 波动: {cost_dev} | 质量: {quality}分")
+                      best_cost = cost
+                      best_stable = stable
+                      best_quality = quality
+                      best_dev = cost_dev
+              return best_cost, best_stable, best_quality, tested, best_dev
+          
+          def process_single_ip(ip_port, interface_url, result_list, lock):
+              """处理单个IP的频道解析+测速，线程安全写入结果"""
               try:
-                  for name,url in channels:
-                      if "CCTV" in name.upper():
-                          ok,avg,stable,q,diag,dev,costs,reso = merged_stream_test(url)
-                          print(f"      {name}: {'✅' if ok else '❌'} 分辨率:{reso} | 平均:{avg}s | 波动:{dev}")
-                          return avg,stable,q,1,dev,reso
-                  ok,avg,stable,q,diag,dev,costs,reso = merged_stream_test(channels[0][1])
-                  print(f"      {channels[0][0]}: {'✅' if ok else '❌'} 分辨率:{reso} | 平均:{avg}s")
-                  return avg,stable,q,1,dev,reso
-              except:
-                  return None,False,0,0,999,"unknown"
-
-          def process_single_ip(ip_port, infourl, result_list, lock):
-              try:
-                  ch = hotel_channels_from_ip_port(ip_port, infourl)
-                  if not ch: return
-                  cost, stable, quality, cnt, dev, reso = batch_stream_test(ip_port, ch)
-                  if cost is None: return
+                  print(f"  并发处理 {ip_port}...")
+                  channels = hotel_channels_from_ip_port(ip_port, interface_url)
+                  if not channels:
+                      print(f"    {ip_port}: 无有效频道信息，跳过")
+                      return
+                  cctv_channels = [(name, url) for name, url in channels if "CCTV" in name.upper()] or channels
+                  print(f"    {ip_port}: 找到 {len(cctv_channels)} 个有效频道，仅测1个核心频道...")
+                  best_cost, best_stable, best_quality, tested_count, best_dev = batch_stream_test(ip_port, cctv_channels)
+                  if tested_count == 0 or best_cost is None:
+                      print(f"    {ip_port}: 跳过 | 无有效分片下载耗时（流失效/超时）")
+                      return
                   with lock:
-                      result_list.append( (ip_port, (cost,stable,quality,dev,reso)) )
-              except:
-                  return
-
+                      result_list.append((ip_port, (best_cost, best_stable, best_quality, best_dev)))
+                  stable_tag = "✅稳定" if best_stable else "⚠️不稳定"
+                  print(f"    {ip_port}: {stable_tag} 已统计 | 下载耗时: {best_cost:.2f}秒 | 波动: {best_dev:.2f} | 质量: {best_quality}分")
+              except Exception as e:
+                  print(f"    {ip_port}: 处理失败 - {e}")
+          
           def hotel_ip_port_from_urls():
-              import urllib3
-              urllib3.disable_warnings()
-              fofa = fofa_crawl_ip()
-              urlset = set()
-
-              for u in SOURCE_URLS:
+              """主函数：提取IP端口+统计耗时"""
+              fofa_ip_set = fofa_crawl_ip()
+              url_ip_set = set()
+              
+              print("\n步骤1: 从直播源URL提取含hls/、tsfile/live/的IP和端口...")
+              for url in SOURCE_URLS:
                   try:
-                      r = requests.get(u, timeout=15, verify=False)
-                      for line in r.text.split():
+                      response = requests.get(url, timeout=15, headers=HEADERS, verify=False)
+                      response.raise_for_status()
+                      lines = response.text.splitlines()
+                      for line in lines:
                           line = line.strip()
-                          if ',' not in line: continue
-                          p = line.split(',',1)[1]
-                          m = re.search(r'//([^:/]+):(\d+)', p)
-                          if m and ('hls/' in p or 'tsfile' in p):
-                              ip = m.group(1)
-                              if not ip.startswith(('10.','172.','192.','127.')):
-                                  urlset.add(f"{ip}:{m.group(2)}")
-                  except:
-                      continue
-
-              allip = list(fofa.union(urlset))
-              available = []
-              with ThreadPoolExecutor(CHECK_THREAD_NUM) as e:
-                  fut = {e.submit(check_ip_availability, ip):ip for ip in allip}
-                  for f in as_completed(fut):
-                      ip = fut[f]
-                      ok, infourl = f.result()
-                      if ok:
-                          available.append( (ip,infourl) )
-
-              out = []
+                          if not line or line.startswith('#') or ',' not in line:
+                              continue
+                          parts = line.split(',', 1)
+                          if len(parts) < 2:
+                              continue
+                          url_part = parts[1].strip()
+                          match = re.search(r'https?://([^:/]+):(\d+)', url_part)
+                          if match and ('hls/' in url_part or 'tsfile/live/' in url_part):
+                              ip = match.group(1)
+                              port = match.group(2)
+                              if not ip.startswith(('10.', '172.16.', '192.168.', '127.')):
+                                  url_ip_set.add(f"{ip}:{port}")
+                      print(f"  从 {url} 提取完成")
+                  except Exception as e:
+                      print(f"处理URL {url} 时发生错误: {e}")
+              
+              ip_port_set = fofa_ip_set.union(url_ip_set)
+              print(f"\n【合并去重】FOFA爬取{len(fofa_ip_set)}个 + 直播源提取{len(url_ip_set)}个 = 总{len(ip_port_set)}个唯一IP:端口")
+              ip_port_list = list(ip_port_set)
+              
+              print(f"\n步骤2: 检测IP端口有效性...")
+              available_ips = []
+              with ThreadPoolExecutor(max_workers=CHECK_THREAD_NUM) as executor:
+                  future_to_ip = {executor.submit(check_ip_availability, ip_port): ip_port for ip_port in ip_port_list}
+                  for future in as_completed(future_to_ip):
+                      ip_port = future_to_ip[future]
+                      try:
+                          is_available, interface_url = future.result()
+                          if is_available:
+                              available_ips.append((ip_port, interface_url))
+                              print(f"  ✓ {ip_port} 可用 (接口: {interface_url})")
+                          else:
+                              print(f"  ✗ {ip_port} 不可用")
+                      except Exception as e:
+                          print(f"检测 {ip_port} 时出错: {e}")
+              
+              print(f"\n共 {len(available_ips)} 个IP:端口可用")
+              if not available_ips:
+                  print("警告: 没有找到可用的IP端口，直接使用所有提取的IP端口")
+                  for ip_port in ip_port_list:
+                      available_ips.append((ip_port, f"http://{ip_port}/iptv/live/1000.json?key=txiptv"))
+              
+              print(f"\n步骤3: 多线程解析频道信息并统计下载耗时...")
+              speed_tested_ips = []
               lock = threading.Lock()
-              with ThreadPoolExecutor(IP_THREAD_NUM) as e:
-                  for ip,infourl in available:
-                      e.submit(process_single_ip, ip, infourl, out, lock)
-
-              out.sort(key=lambda x:x[1][0])
-              os.makedirs("Hotel/ip", exist_ok=True)
-              with open("Hotel/ip/hotel_ip.txt","w",encoding="utf-8") as f:
-                  for ip,info in out:
-                      cost,stable,quality,dev,reso = info
-                      f.write(f"{ip} # 分辨率:{reso} 耗时:{cost:.1f}s 质量:{quality}\n")
-
-              print("\n===== 完成 =====")
-              print(f"有效IP: {len(out)}")
-              for idx,(ip,info) in enumerate(out[:20],1):
-                  c,s,q,d,r = info
-                  print(f"{idx:2d}. {ip} | {r} | {c:.1f}s")
-
+              with ThreadPoolExecutor(max_workers=IP_THREAD_NUM) as ip_executor:
+                  for ip_port, interface_url in available_ips:
+                      ip_executor.submit(process_single_ip, ip_port, interface_url, speed_tested_ips, lock)
+              
+              # 按下载耗时升序排序
+              speed_tested_ips.sort(key=lambda x: x[1][0])
+              print(f"\n步骤4: 保存所有有效IP端口（按下载耗时升序）...")
+              output_dir = "Hotel/ip"
+              os.makedirs(output_dir, exist_ok=True)
+              output_file = os.path.join(output_dir, "hotel_ip.txt")
+              with open(output_file, 'w', encoding='utf-8') as f:
+                  for ip_port, _ in speed_tested_ips:
+                      f.write(f"{ip_port}\n")
+              if not speed_tested_ips:
+                  with open(output_file, 'w', encoding='utf-8') as f:
+                      for ip_port, _ in available_ips:
+                          f.write(f"{ip_port}  # 无有效下载耗时\n")
+              
+              # 输出统计结果
+              print(f"\n" + "="*80)
+              print(f"处理完成统计【FOFA+直播源提取】")
+              print(f"  - FOFA爬取iptv/live/相关IP: {len(fofa_ip_set)} 个")
+              print(f"  - 直播源提取IP端口: {len(url_ip_set)} 个")
+              print(f"  - 合并去重后总IP: {len(ip_port_set)} 个")
+              print(f"  - 可用IP端口: {len(available_ips)} 个")
+              print(f"  - 有效IP端口(获取到下载耗时): {len(speed_tested_ips)} 个")
+              print(f"  - 稳定流IP(低波动): {len([x for x in speed_tested_ips if x[1][1]])} 个")
+              print(f"  - 结果已保存到: {output_file}")
+              print("="*80)
+              
+              if speed_tested_ips:
+                  print(f"\n有效IP端口(按下载耗时升序排列):")
+                  show_num = min(50, len(speed_tested_ips))
+                  for i, (ip_port, (cost, stable, quality, dev)) in enumerate(speed_tested_ips[:show_num], 1):
+                      stable_tag = "✅" if stable else "⚠️"
+                      print(f"  {i:2d}. {ip_port} | {stable_tag} 耗时: {cost:.2f}秒 | 波动: {dev:.2f} | 质量: {quality}分")
+                  if len(speed_tested_ips) > show_num:
+                      print(f"  ... 还有 {len(speed_tested_ips)-show_num} 个有效IP端口")
+              else:
+                  print(f"\n警告: 未找到能获取有效下载耗时的IP端口")
+          
           if __name__ == "__main__":
+              import urllib3
+              urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
               hotel_ip_port_from_urls()
           EOF
           python hotel_ip_port.py
-
-      - name: Commit and push
+              
+      - name: Commit and push if changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add Hotel/ip/hotel_ip.txt
-          git diff --quiet || git commit -m "自动更新 IP+分辨率 $(date '+%Y-%m-%d %H:%M')"
+          git diff --quiet && git diff --staged --quiet || git commit -m "自动更新提取 IP and Port $(date '+%Y-%m-%d %H:%M:%S')"
           git push
