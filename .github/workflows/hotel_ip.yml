@@ -448,7 +448,7 @@ jobs:
               
               if speed_tested_ips:
                   print(f"\n有效IP端口(按 分辨率→耗时 排序):")
-                  show_num = min(50, len(speed_tested_ips))
+                  show_num = min(100, len(speed_tested_ips))
                   for i, (ip_port, (cost, stable, quality, dev, res_level, res_name)) in enumerate(speed_tested_ips[:show_num], 1):
                       stable_tag = "✅" if stable else "⚠️"
                       print(f"  {i:2d}. {ip_port} | {stable_tag} {res_name} | 耗时: {cost:.2f}秒 | 波动: {dev:.2f} | 质量: {quality}分")
