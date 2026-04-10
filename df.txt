@@ -329,13 +329,13 @@ CCTV10,http://74.91.26.218:82/live/cctv10hd.m3u8
 浙江少儿,video://https://www.cztv.com/liveTV/108
 浙江国际,video://https://www.cztv.com/liveTV/110
 浙江之江纪录,video://https://www.cztv.com/liveTV/112
+绍兴新闻综合,video://https://www.shaoxing.com.cn/app/tv/78
+绍兴公共频道,video://https://www.shaoxing.com.cn/app/tv/75
+绍兴文化影视,video://http://www.shaoxing.com.cn/app/tv/74
 绍兴新闻综合,http://live.shaoxing.com.cn/video/s10001-sxhb/index.m3u8
 绍兴新闻综合,http://live.shaoxing.com.cn/video/s10001-sxtv1/index.m3u8
 绍兴公共频道,http://live.shaoxing.com.cn/video/s10001-sxtv2/index.m3u8
 绍兴文化影视,http://live.shaoxing.com.cn/video/s10001-sxtv3/index.m3u8
-绍兴新闻综合,video://https://www.shaoxing.com.cn/app/tv/78
-绍兴公共频道,video://https://www.shaoxing.com.cn/app/tv/75
-绍兴文化影视,video://http://www.shaoxing.com.cn/app/tv/74
 宁波新闻综合,video://https://www.ncmc.nbtv.cn/gbds/folder8458/NBTV1/index.shtml
 宁波经济生活,video://https://www.ncmc.nbtv.cn/gbds/folder8458/NBTV2/index.shtml
 宁波都市文体,video://https://www.ncmc.nbtv.cn/gbds/folder8458/NBTV3/index.shtml
