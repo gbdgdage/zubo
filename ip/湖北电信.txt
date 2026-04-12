@@ -3,6 +3,7 @@
 221.232.41.214:8888
 27.18.153.170:8888
 58.19.32.207:4022
+hiliu.myds.me:18088
 nas.lyfkai.cn:19999
 www.hiliu.myds.me:18088
 xu3791vg3503.vicp.fun:8808

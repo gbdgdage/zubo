@@ -8,6 +8,7 @@
 222.189.167.42:4022
 49.77.20.134:8118
 home.amucn.net:8800
+kouki.pro:8888
 www.huijie5421.cn:8800
 www.sclvip.top:5566
 www.sclvip.top:8787
