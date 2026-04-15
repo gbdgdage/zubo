@@ -212,21 +212,6 @@ CHC影迷电影,http://39.135.126.62/hwottcdn1.ln.chinamobile.com/PLTV/11/224/32
 辽宁卫视,http://39.135.126.62/hwottcdn1.ln.chinamobile.com/PLTV/11/224/3221226141/index.m3u8
 
 央网,#genre#
-CCTV1,http://112.27.235.94:8000/hls/1/index.m3u8
-CCTV2,http://112.27.235.94:8000/hls/2/index.m3u8
-CCTV3,http://112.27.235.94:8000/hls/3/index.m3u8
-CCTV4,http://112.27.235.94:8000/hls/4/index.m3u8
-CCTV5,http://112.27.235.94:8000/hls/5/index.m3u8
-CCTV6,http://112.27.235.94:8000/hls/7/index.m3u8
-CCTV7,http://112.27.235.94:8000/hls/8/index.m3u8
-CCTV8,http://112.27.235.94:8000/hls/9/index.m3u8
-CCTV9,http://112.27.235.94:8000/hls/10/index.m3u8
-CCTV10,http://112.27.235.94:8000/hls/11/index.m3u8
-北京卫视,http://112.27.235.94:8000/hls/27/index.m3u8
-上海卫视,http://112.27.235.94:8000/hls/28/index.m3u8
-浙江卫视,http://112.27.235.94:8000/hls/29/index.m3u8
-广东卫视,http://112.27.235.94:8000/hls/30/index.m3u8
-湖南卫视,http://112.27.235.94:8000/hls/31/index.m3u8
 CCTV1,http://123.184.31.206:8880/sql/2233/hls.m3u8
 CCTV2,http://123.184.31.206:8880/sql/2234/hls.m3u8
 北京卫视,http://123.184.31.206:8880/sql/2249/hls.m3u8
