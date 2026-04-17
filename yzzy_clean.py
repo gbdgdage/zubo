@@ -2,7 +2,6 @@ import requests
 import re
 from urllib import parse
 import sys
-import os
 from datetime import datetime
 
 # -------------------------- 配置区 --------------------------
@@ -13,11 +12,6 @@ HEADERS = {
 LOG_FILE = "m3u8_clean_log.txt"
 OUTPUT_FILE = "cleaned.m3u8"
 # -----------------------------------------------------------
-
-# 强制创建日志文件（防止后续写失败）
-with open(LOG_FILE, "w", encoding="utf-8") as f:
-    f.write("=== M3U8 去广告处理日志 ===\n")
-print(f"✅ Log file initialized at: {os.path.abspath(LOG_FILE)}")
 
 def log(msg):
     """同时打印到控制台和日志文件"""
@@ -37,8 +31,8 @@ def del_ads(url, headers):
         
         log("✅ 成功获取原始m3u8内容")
         log(f"原始内容行数: {len(resp.text.splitlines())}")
-        log("--- 原始m3u8内容（前500字符） ---")
-        log(resp.text[:500] + ("..." if len(resp.text) > 500 else ""))
+        log("--- 原始m3u8内容 ---")
+        log(resp.text[:500] + ("..." if len(resp.text) > 500 else "")) # 只打印前500字符，太长的话
         
         scheme = 'http'
         root = '/'
@@ -130,25 +124,28 @@ def del_ads(url, headers):
         content = content.strip()
         
         log(f"✅ 最终处理完成，行数: {len(content.splitlines())}")
-        log("--- 最终清理后的m3u8内容（前2000字符） ---")
+        log("--- 最终清理后的m3u8内容（前100行） ---")
         log(content[:2000] + ("\n..." if len(content) > 2000 else ""))
         
         return content if content else '#EXTM3U\n#EXT-X-ENDLIST'
         
     except Exception as e:
         log(f"❌ 处理出错: {e}")
-        import traceback
-        log(traceback.format_exc()) # 打印完整错误栈，方便排查
         return '#EXTM3U\n#EXT-X-ENDLIST'
 
 if __name__ == "__main__":
+    # 清空日志文件
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        f.write("=== M3U8 去广告处理日志 ===\n")
+    
     cleaned_content = del_ads(URL, HEADERS)
     
     # 写入最终文件
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(cleaned_content)
-    print(f"✅ Output file saved at: {os.path.abspath(OUTPUT_FILE)}")
     
     log(f"\n🎉 处理完成！")
     log(f"日志文件: {LOG_FILE}")
     log(f"输出文件: {OUTPUT_FILE}")
+    print("\n" + "="*50)
+    print("你可以打开 m3u8_clean_log.txt 查看每一步的详细过程，对比原始/补全后/最终的内容差异。")
