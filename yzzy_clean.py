@@ -61,24 +61,29 @@ for i, line in enumerate(lines):
 
 log(f"✅ 中间广告删除后行数：{len(clean_lines)}")
 
-# 4. 处理结尾广告（最后一个DISC到ENDLIST）
-if disc_lines:
-    last_disc = disc_lines[-1]
-    # 找到ENDLIST的位置
-    endlist_idx = None
+# 4. 处理结尾广告（直接在clean_lines里找，不依赖原始行号）
+# 从后往前找最后一个DISCONTINUITY
+last_disc_idx = -1
+endlist_idx = -1
+for i in range(len(clean_lines)-1, -1, -1):
+    line = clean_lines[i].strip()
+    if line == "#EXT-X-DISCONTINUITY":
+        last_disc_idx = i
+    if line == "#EXT-X-ENDLIST":
+        endlist_idx = i
+    if last_disc_idx != -1 and endlist_idx != -1:
+        break
+
+# 统计DISC到ENDLIST之间的EXTINF数量
+if last_disc_idx != -1 and endlist_idx != -1:
     extinf_count = 0
-    for j in range(last_disc + 1, len(lines)):
-        if lines[j].strip().startswith("#EXTINF:"):
+    for j in range(last_disc_idx + 1, endlist_idx):
+        if clean_lines[j].strip().startswith("#EXTINF:"):
             extinf_count += 1
-        if lines[j].strip() == "#EXT-X-ENDLIST":
-            endlist_idx = j
-            break
-    # 确认是广告段
-    if endlist_idx and 4 <= extinf_count <= 7:
-        log(f"🎯 发现结尾广告：行{last_disc}到行{endlist_idx}，包含{extinf_count}个TS")
-        # 保留到最后一个正片行，再加上ENDLIST
-        clean_lines = clean_lines[:last_disc]
-        clean_lines.append("#EXT-X-ENDLIST\n")
+    if 4 <= extinf_count <= 7:
+        log(f"🎯 发现结尾广告：行{last_disc_idx}到行{endlist_idx}，包含{extinf_count}个TS")
+        # 删掉DISC到ENDLIST之间的所有内容，只保留ENDLIST
+        clean_lines = clean_lines[:last_disc_idx] + ["#EXT-X-ENDLIST\n"]
 
 # 5. 整理最终内容，去重复ENDLIST
 final_content = "".join(clean_lines)
@@ -93,8 +98,8 @@ if "#EXT-X-ENDLIST" not in final_content:
 final_content = re.sub(r'\n+', '\n', final_content).strip() + '\n'
 
 log(f"\n✅ 清理后总行数：{len(final_content.splitlines())}")
-log("=== 最终清理结果（最后20行） ===")
-log("\n".join(final_content.splitlines()[-20:]))
+log("=== 最终清理结果（最后10行） ===")
+log("\n".join(final_content.splitlines()[-10:]))
 
 # 保存文件
 with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
