@@ -1,4 +1,2 @@
-112.192.72.3:8484
-112.192.73.127:8484
 home2.neumantang.com:8888
 www.alphauncle.com:2715
