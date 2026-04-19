@@ -1,4 +1,5 @@
 0000505.xyz:8888
+223.144.223.12:3000
 phmanet.com:9999
 www.andy-nas.top:8623
 www.hunterpoon.tech:4000

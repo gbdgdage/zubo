@@ -1,4 +1,7 @@
+113.100.31.122:4022
 113.102.83.19:4022
+113.104.184.195:7088
+113.119.24.177:58888
 113.65.124.131:9527
 113.65.124.131:9530
 113.68.255.217:8889
@@ -35,8 +38,11 @@ lbyjlt.vv5678.cn:8880
 pr.19760929.xyz:9688
 vp.maomizi.cc:9530
 wmh.wmh.ink:6633
+www.hongzhijiaoyu.net:8188
 www.maomizi.cn:9527
 www.maomizi.cn:9530
+www.ruoshui.uno:554
+www.syy3.top:3861
 www.yahao.host:4022
 xxika.synology.me:8188
 yahao.myqnapcloud.com:4022

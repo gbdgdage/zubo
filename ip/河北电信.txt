@@ -1,5 +1,9 @@
+106.116.126.196:4022
 106.116.240.15:9999
+106.116.243.248:9999
+111.226.232.161:10010
 dsm.xlangnan.cn:10316
 emby.xlangnan.cn:10316
 share.xlangnan.cn:10316
 www.sjwyp.com:4022
+yaching.xmtcenter.com:9999

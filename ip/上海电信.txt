@@ -1,8 +1,10 @@
 116.237.61.115:4022
+139.196.151.191:2051
 223.167.230.46:4022
 liuwenxiaokevin.top:14044
 raytitor.cn:8888
 woshiysy1.synology.me:4999
+woshiysy2.synology.me:4999
 www.rongrong.me:14022
 www.wjyu.top:4022
 www.yyf1991.top:9999
