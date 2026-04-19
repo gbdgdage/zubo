@@ -2,3 +2,4 @@
 libretv.ayemovie.top:5555
 op.ayemovie.top:5555
 xiaoya.ayemovie.top:5555
+116.2.172.58:4010

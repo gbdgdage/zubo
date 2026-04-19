@@ -3,3 +3,4 @@ kms.yzzdxc.cn:16666
 nas.yzzdxc.cn:16666
 tonyk.56301232.xyz:3477
 tv.yzzdxc.cn:16666
+36.49.54.222:8800

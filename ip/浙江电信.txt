@@ -1,4 +1,5 @@
 122.243.255.142:8001
+125.107.55.100:8888
 125.113.113.73:8001
 hs.hejd.net:7088
 hs.imyjy.cn:7088
@@ -7,3 +8,4 @@ l3.negative.video:50000
 www.liangcl.top:8686
 www.lvyjay.win:4022
 www.negative.top:50000
+123.157.31.182:7912
