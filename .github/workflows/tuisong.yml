@@ -1,25 +1,21 @@
 name: tuisong
-
 on:
   workflow_run:
     workflows: ["zubo", "hotel"]
     types: [completed]
   workflow_dispatch:
-
 jobs:
   sync:
     runs-on: ubuntu-latest
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success')
-
     steps:
       - name: Checkout 源仓库
         uses: actions/checkout@v4
         with:
           path: source
           fetch-depth: 1
-
       - name: Checkout 目标仓库
         uses: actions/checkout@v4
         with:
@@ -27,26 +23,32 @@ jobs:
           token: ${{ secrets.TARGET_REPO_TOKEN }}
           path: target
           fetch-depth: 1
-
-      - name: 同步文件并把df.txt追加到hotel.txt
+      - name: 同步文件并把df.txt追加到IPTV.txt和hotel.txt
         run: |
           TRIGGER_WORKFLOW="${{ github.event.workflow_run.name }}"
           echo "触发 workflow: $TRIGGER_WORKFLOW"
 
-          # 同步 IPTV.txt（不追加 df）
+          # 同步 IPTV.txt 并追加 df.txt
           if [ "$TRIGGER_WORKFLOW" = "zubo" ] || [ "$TRIGGER_WORKFLOW" = "" ]; then
             if [ -f "source/IPTV.txt" ]; then
               cp -f source/IPTV.txt target/
-              echo "✅ 同步 IPTV.txt（不追加df）"
+              echo "✅ 同步 IPTV.txt"
+              # 追加 df.txt 到 IPTV.txt 末尾
+              if [ -f "source/df.txt" ]; then
+                echo "" >> target/IPTV.txt
+                cat source/df.txt >> target/IPTV.txt
+                echo "✅ 已把 df.txt 追加到 IPTV.txt 末尾"
+              else
+                echo "ℹ️ 未找到 df.txt，跳过追加"
+              fi
             fi
           fi
 
-          # 同步 hotel.txt 并 追加 df.txt 到末尾
+          # 同步 hotel.txt 并追加 df.txt 到末尾
           if [ "$TRIGGER_WORKFLOW" = "hotel" ] || [ "$TRIGGER_WORKFLOW" = "" ]; then
             if [ -f "source/Hotel/hotel.txt" ]; then
               cp -f source/Hotel/hotel.txt target/
               echo "✅ 同步 hotel.txt"
-
               # 追加 df.txt 到 hotel.txt 末尾
               if [ -f "source/df.txt" ]; then
                 echo "" >> target/hotel.txt
@@ -64,5 +66,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add IPTV.txt hotel.txt || true
-          git commit -m "chore: 同步并将df.txt追加到hotel.txt" || echo "⚠️ 无文件变更"
+          git commit -m "chore: 同步并将df.txt追加到IPTV.txt和hotel.txt" || echo "⚠️ 无文件变更"
           git push origin master
