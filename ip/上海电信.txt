@@ -4,7 +4,6 @@
 223.167.245.61:8001
 liuwenxiaokevin.top:14044
 raytitor.cn:8888
-woshiysy1.synology.me:4999
 woshiysy2.synology.me:4999
 www.rongrong.me:14022
 www.wjyu.top:4022
