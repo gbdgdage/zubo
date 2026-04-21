@@ -27,6 +27,7 @@ jobs:
 
       - name: 同步文件并按规则追加内容
         run: |
+          set -e
           TRIGGER_WORKFLOW="${{ github.event.workflow_run.name }}"
           echo "触发 workflow: $TRIGGER_WORKFLOW"
 
@@ -46,16 +47,15 @@ jobs:
             fi
           fi
 
-          # 同步 hotel.txt → 先追加「数字,#genre#」分类区块 → 再追加 df.txt
+          # 同步 hotel.txt → 追加「数字,#genre#」区块到文件末尾，再追加 df.txt
           if [ "$TRIGGER_WORKFLOW" = "hotel" ] || [ "$TRIGGER_WORKFLOW" = "" ]; then
             if [ -f "source/Hotel/hotel.txt" ]; then
               cp -f source/Hotel/hotel.txt target/
               echo "✅ 同步 hotel.txt"
-              # 追加 IPTV.txt 中 从「数字,#genre#」开头到下一个「#genre#」分类前的整个区块
+              # 追加 IPTV.txt 中 从「数字,#genre#」开始到文件末尾的所有内容
               if [ -f "source/IPTV.txt" ]; then
                 echo "" >> target/hotel.txt
-                # 截取从数字,#genre#开始，到下一个包含#genre#的行之前的所有内容
-                awk '/^数字,#genre#/,/^.*#genre#/ {print}' source/IPTV.txt | grep -v '^.*#genre#$' >> target/hotel.txt
+                awk '/^数字,#genre#/,0 {print}' source/IPTV.txt >> target/hotel.txt || true
                 echo "✅ 已把 IPTV.txt 中「数字,#genre#」的完整频道区块追加到 hotel.txt"
               else
                 echo "ℹ️ 未找到 IPTV.txt，跳过追加频道"
@@ -77,5 +77,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add IPTV.txt hotel.txt || true
-          git commit -m "chore: 同步并追加" || echo "⚠️ 无文件变更"
-          git push origin master
+          git commit -m "chore: 同步并追加IPTV「数字,#genre#」区块与df.txt到hotel.txt" || echo "⚠️ 无文件变更，跳过提交"
+          git push origin master || echo "⚠️ 推送失败，可能无变更"
