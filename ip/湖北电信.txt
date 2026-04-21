@@ -3,12 +3,10 @@
 27.17.213.212:8888
 27.18.153.170:8888
 27.18.238.11:9100
-27.25.75.3:10022
 58.19.32.207:4022
 alist.xicp.fun:52057
 hiliu.myds.me:18088
 nas.lyfkai.cn:19999
-www.divcloud.top:8899
 www.hiliu.myds.me:18088
 xu3791vg3503.vicp.fun:8808
 zhangkx717.cn:9999

@@ -1,5 +1,4 @@
 222.141.236.118:8003
-42.237.212.68:4022
 aylzsu.cn:9999
 hnzznas.xgpuplay.eu.org:8818
 wangfei.uno:9999
