@@ -1,5 +1,4 @@
 106.87.49.114:8888
-125.86.26.68:8003
 home.scanflove.com:7788
 hook.msen.site:8000
 msen.site:8000
